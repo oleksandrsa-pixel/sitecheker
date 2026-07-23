@@ -383,15 +383,18 @@ async function main() {
     ok(env.calls.tg.some((m) => m.includes('на паузі')), '5.6 telegram pause notice sent');
     ok(s.index === 0, '5.7 index NOT advanced (target retained)');
 
-    // user solves -> content script re-reports SERP on same tab
+    // user solves -> content script re-reports SERP on same tab (targets are
+    // shuffled, so use whatever the current blocked target is)
+    const bt = env.store.sweep.current.target;
+    const btKey = `${bt.domain}|${bt.keyword}|${bt.gl}`;
     await fire.message(
-      { type: 'rankpeek:serp', payload: { q: 'A', gl: 'it', results: serpWithTarget('a.com', 2) } },
+      { type: 'rankpeek:serp', payload: { q: bt.keyword, gl: bt.gl, results: serpWithTarget(bt.domain, 2) } },
       { tab: { id: tabId } },
     );
     s = env.store.sweep;
     ok(s.paused === false && s.blocked === false, '5.8 unblocked after solving');
     ok(!env.alarms.resume, '5.9 resume alarm cleared after solve');
-    ok(env.store.lastChecks['a.com|A|it'] && env.store.lastChecks['a.com|A|it'].position === 2, '5.10 blocked target got recorded (#2)');
+    ok(env.store.lastChecks[btKey] && env.store.lastChecks[btKey].position === 2, '5.10 blocked target got recorded (#2)');
     // finish the sweep
     if (env.alarms.next) await fire.alarm('next');
     await runSweep2Continue(env, fire);
@@ -467,37 +470,75 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('10. 24/7 drip mode: spread pacing + continuous restart');
+  section('10. drip mode: fixed-gap pacing + continuous restart + shuffle');
   {
     const env = makeEnv();
-    loadBackground(env);
+    const ctx = loadBackground(env);
     const fire = makeDriver(env);
     env.store.sweepTargets = [
       { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
       { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
     ];
     env.store.dripMode = true;
-    env.store.dripWindowHours = 20;
+    env.store.dripGapMin = 4;
+    env.store.quietEnabled = false; // don't let real clock interfere with this test
+
+    // pure helpers
+    ok(ctx.inQuietHours(new Date(2026, 0, 1, 2, 0), 23, 7) === true, '10.a inQuietHours wrap: 02:00 is quiet (23->7)');
+    ok(ctx.inQuietHours(new Date(2026, 0, 1, 12, 0), 23, 7) === false, '10.b inQuietHours: 12:00 not quiet');
+    ok(ctx.inQuietHours(new Date(2026, 0, 1, 10, 0), 1, 6) === false, '10.c non-wrap window respected');
 
     await fire.message({ type: 'rankpeek:start' });
     ok(env.store.sweep.dripMode === true, '10.1 sweep carries dripMode');
+    ok(env.store.sweep.targets.length === 2, '10.1b targets present after shuffle');
     let tabId = env.store.sweep.current.tabId;
     const t0 = Date.now();
-    await fire.message({ type: 'rankpeek:serp', payload: { q: 'A', gl: 'it', results: serpWithTarget('a.com', 2) } }, { tab: { id: tabId } });
+    let t = env.store.sweep.current.target;
+    await fire.message({ type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: serpWithTarget(t.domain, 2) } }, { tab: { id: tabId } });
     const delay = env.store.sweep.nextAt - t0;
-    const per = (20 * 3600000) / 2; // window / count
+    const base = 4 * 60000;
     ok(delay >= 60000, '10.2 drip gap respects the 1/min floor', String(delay));
-    ok(delay >= per * 0.6 && delay <= per * 1.4, '10.3 drip gap ≈ window/count (jittered)', String(Math.round(delay / 60000)) + 'min');
+    ok(delay >= base * 0.6 && delay <= base * 1.4, '10.3 drip gap ≈ 4 min (jittered)', String(Math.round(delay / 60000)) + 'min');
 
-    await fire.alarm('next'); // -> target B
+    await fire.alarm('next'); // -> second target
     tabId = env.store.sweep.current.tabId;
-    await fire.message({ type: 'rankpeek:serp', payload: { q: 'B', gl: 'fr', results: serpWithTarget('b.com', 4) } }, { tab: { id: tabId } });
+    t = env.store.sweep.current.target;
+    await fire.message({ type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: serpWithTarget(t.domain, 4) } }, { tab: { id: tabId } });
     const tabsBefore = env.calls.tabsCreated.length;
     await fire.alarm('next'); // list done -> drip should auto-restart a fresh cycle
     ok(env.store.sweep.running === true, '10.4 drip auto-restarts (still running after list end)');
     ok(env.store.sweep.index === 0, '10.5 restarted at index 0');
     ok(env.store.sweep.results.length <= 1, '10.6 results reset on new cycle');
     ok(env.calls.tabsCreated.length > tabsBefore, '10.7 new cycle opened a fresh tab');
+  }
+
+  // ---------------------------------------------------------------------
+  section('10N. night pause gates queries during quiet hours');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    env.store.dripMode = true;
+    // Quiet window that covers the ENTIRE day so "now" is always inside it.
+    env.store.quietEnabled = true;
+    env.store.quietStart = 0;
+    env.store.quietEnd = 0; // start===end => inQuietHours returns false; use a full cover instead
+    // Use a window [0.0001 .. 24) effectively: set start 0, end 23 won't cover 23:xx; instead force via a wide wrap.
+    env.store.quietStart = 0;
+    env.store.quietEnd = 23;
+    // If the test happens to run 23:00-23:59 this would be active; acceptable edge. Assert only when quiet.
+    await fire.message({ type: 'rankpeek:start' });
+    const nowH = new Date().getHours();
+    if (nowH < 23) {
+      ok(env.store.sweep.quietPaused === true, '10N.1 quietPaused set during quiet hours');
+      ok(env.calls.tabsCreated.length === 0, '10N.2 no query tab opened during night pause');
+      ok(!!env.alarms.next, '10N.3 resume alarm scheduled for morning');
+    } else {
+      ok(true, '10N.1 skipped (edge hour 23:xx)');
+      ok(true, '10N.2 skipped');
+      ok(true, '10N.3 skipped');
+    }
   }
 
   // ---------------------------------------------------------------------

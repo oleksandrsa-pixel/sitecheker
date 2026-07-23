@@ -37,7 +37,10 @@ function loadConfig() {
       'autoSchedule',
       'scheduleHours',
       'dripMode',
-      'dripWindowHours',
+      'dripGapMin',
+      'quietEnabled',
+      'quietStart',
+      'quietEnd',
       'dailyReport',
       'dailyReportHour',
     ],
@@ -56,7 +59,10 @@ function loadConfig() {
       $('auto').checked = Boolean(v.autoSchedule);
       $('hours').value = v.scheduleHours || 4;
       $('drip').checked = Boolean(v.dripMode);
-      $('dripwin').value = v.dripWindowHours || 20;
+      $('dripgap').value = v.dripGapMin || 4;
+      $('quiet').checked = v.quietEnabled !== false; // default ON
+      $('quietstart').value = v.quietStart != null ? v.quietStart : 23;
+      $('quietend').value = v.quietEnd != null ? v.quietEnd : 7;
       $('daily').checked = Boolean(v.dailyReport);
       $('dailyhour').value = v.dailyReportHour != null ? v.dailyReportHour : 9;
     },
@@ -207,7 +213,12 @@ function render() {
       const badge = $('badge');
       badge.style.background = '';
       badge.style.color = '';
-      if (s?.running && s.paused) {
+      if (s?.running && s.quietPaused) {
+        badge.textContent = '🌙 нічна пауза';
+        badge.className = 'badge';
+        badge.style.background = 'rgba(99,102,241,.18)';
+        badge.style.color = '#a5b4fc';
+      } else if (s?.running && s.paused) {
         badge.textContent = s.blocked ? '⏸ CAPTCHA — реши у вкладці' : '⏸ пауза';
         badge.className = 'badge';
         badge.style.background = 'rgba(248,113,113,.16)';
@@ -224,7 +235,9 @@ function render() {
       }
 
       // Status line
-      if (s?.running && s.paused) {
+      if (s?.running && s.quietPaused) {
+        $('status').textContent = 'Нічна пауза — перевірки відновляться вранці.';
+      } else if (s?.running && s.paused) {
         const cur = s.current?.target;
         $('status').textContent = s.blocked
           ? `Google показав перевірку${cur ? ` на «${cur.keyword}»` : ''}. Розв'яжи CAPTCHA у відкритій вкладці — прохід продовжиться сам.`
@@ -270,7 +283,10 @@ $('savetg').addEventListener('click', () => {
     autoSchedule: $('auto').checked,
     scheduleHours: Math.max(1, Number($('hours').value) || 4),
     dripMode: $('drip').checked,
-    dripWindowHours: Math.min(24, Math.max(1, Number($('dripwin').value) || 20)),
+    dripGapMin: Math.min(60, Math.max(1, Number($('dripgap').value) || 4)),
+    quietEnabled: $('quiet').checked,
+    quietStart: Math.min(23, Math.max(0, Number($('quietstart').value) || 0)),
+    quietEnd: Math.min(23, Math.max(0, Number($('quietend').value) || 0)),
     dailyReport: $('daily').checked,
     dailyReportHour: Math.min(23, Math.max(0, Number($('dailyhour').value) || 9)),
   };
@@ -278,9 +294,10 @@ $('savetg').addEventListener('click', () => {
     chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm alarms / start drip
     $('tgmsg').style.color = '#16a34a';
     const parts = [];
-    if (cfg.dripMode) parts.push(`24/7 drip (${cfg.dripWindowHours} год)`);
+    if (cfg.dripMode) parts.push(`drip ~${cfg.dripGapMin} хв`);
     else if (cfg.autoSchedule) parts.push(`авто-прохід кожні ${cfg.scheduleHours} год`);
     else parts.push('авто-прохід вимкнено');
+    if (cfg.quietEnabled) parts.push(`нічна пауза ${cfg.quietStart}-${cfg.quietEnd}`);
     if (cfg.dailyReport) parts.push(`звіт о ${cfg.dailyReportHour}:00`);
     $('tgmsg').textContent = `Збережено ✓ · ${parts.join(' · ')}`;
     setTimeout(() => ($('tgmsg').textContent = ''), 3000);

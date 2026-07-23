@@ -268,12 +268,17 @@
     <input id="hours" type="number" min="1" step="1" value="4" style="width: 52px" /> год
   </label>
   <label style="display: block; margin-top: 8px; color: var(--muted)">
-    <input id="drip" type="checkbox" /> <b>Режим 24/7</b>: розтягнути весь список на
-    <input id="dripwin" type="number" min="1" max="24" step="1" value="20" style="width: 52px" /> год
+    <input id="drip" type="checkbox" /> <b>Повільний режим (drip)</b>: 1 запит кожні
+    <input id="dripgap" type="number" min="1" max="60" step="1" value="4" style="width: 52px" /> хв
+  </label>
+  <label style="display: block; margin-top: 6px; color: var(--muted)">
+    <input id="quiet" type="checkbox" checked /> <b>Нічна пауза</b> з
+    <input id="quietstart" type="number" min="0" max="23" step="1" value="23" style="width: 46px" /> :00 до
+    <input id="quietend" type="number" min="0" max="23" step="1" value="7" style="width: 46px" /> :00
   </label>
   <p class="hint" style="margin-left: 22px; margin-top: -2px">
-    Найм'якший темп проти блокувань: ~1 запит раз на кілька хвилин, по колу цілодобово
-    (комп має бути ввімкнений). Замінює «авто-прохід кожні N год».
+    Найм'якший темп проти блокувань: ~1 запит на 3–5 хв (± рандом), удень, з нічною паузою
+    (≈16 активних годин). Порядок запитів рандомізується. По колу; комп має бути ввімкнений.
   </p>
   <label style="display: block; margin-top: 4px; color: var(--muted)">
     <input id="daily" type="checkbox" /> <b>Щоденний звіт</b> у Telegram о

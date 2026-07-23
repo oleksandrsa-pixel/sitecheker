@@ -25,9 +25,11 @@ const DEFAULT_BATCH_PAUSE_SEC = 180; // length of that long break
 const DEFAULT_COOLDOWN_MIN = 30; // wait after a block before auto-retry
 const RESULT_TIMEOUT_MS = 22_000; // abandon a query with no result after this
 const SOFT_FAIL_LIMIT = 2; // consecutive errors that look like a soft block
-const DEFAULT_DRIP_WINDOW_H = 20; // 24/7 mode: spread the whole list over this many hours
-const DRIP_MIN_GAP_MS = 60_000; // never faster than 1/min even for tiny lists
+const DEFAULT_DRIP_GAP_MIN = 4; // drip mode: minutes between queries (jittered ~3-5)
+const DRIP_MIN_GAP_MS = 60_000; // never faster than 1/min even if misconfigured
 const DEFAULT_DAILY_REPORT_HOUR = 9; // daily Telegram report time (local)
+const DEFAULT_QUIET_START = 23; // night pause start (local hour)
+const DEFAULT_QUIET_END = 7; // night pause end (local hour) -> ~16h active window
 
 // One row per (site x keyword x geo). gl = country, hl = local language.
 const DEFAULT_TARGETS = [
@@ -64,6 +66,35 @@ const today = () => new Date().toISOString().slice(0, 10);
 // Random jitter so gaps between queries never look mechanical (±35%).
 const jitter = (ms) => Math.round(ms * (0.65 + Math.random() * 0.7));
 
+// Fisher-Yates shuffle — randomize target order each pass so the query stream
+// isn't a fixed "same brands, gl/hl flipped per row" rank-tracker signature.
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
+}
+
+// Night pause: is `d` inside the quiet window [start,end) in local hours?
+// Handles wrap-around (e.g. 23 -> 7).
+function inQuietHours(d, start, end) {
+  if (start === end) return false;
+  const h = d.getHours() + d.getMinutes() / 60;
+  return start < end ? h >= start && h < end : h >= start || h < end;
+}
+
+// Ms from `d` until the next local `end` o'clock (when the quiet window lifts).
+function msUntilQuietEnd(d, end) {
+  const t = new Date(d);
+  t.setHours(end, 0, 0, 0);
+  if (t <= d) t.setDate(t.getDate() + 1);
+  return t - d;
+}
+
 // URL patterns that mean "Google is challenging us, not serving results".
 const isBlockUrl = (u) =>
   /\/sorry\//i.test(u || '') ||
@@ -94,7 +125,10 @@ async function getConfig() {
     'batchPauseSec',
     'cooldownMin',
     'dripMode',
-    'dripWindowHours',
+    'dripGapMin',
+    'quietEnabled',
+    'quietStart',
+    'quietEnd',
   ]);
   const delaySec = Math.max(3, Number(v.stepDelaySec) || DEFAULT_STEP_DELAY_SEC);
   return {
@@ -105,7 +139,10 @@ async function getConfig() {
     batchPauseMs: Math.max(30, Number(v.batchPauseSec) || DEFAULT_BATCH_PAUSE_SEC) * 1000,
     cooldownMs: Math.max(1, Number(v.cooldownMin) || DEFAULT_COOLDOWN_MIN) * 60_000,
     dripMode: Boolean(v.dripMode),
-    dripWindowMs: Math.max(1, Number(v.dripWindowHours) || DEFAULT_DRIP_WINDOW_H) * 3600_000,
+    dripGapMs: Math.max(1, Number(v.dripGapMin) || DEFAULT_DRIP_GAP_MIN) * 60_000,
+    quietEnabled: Boolean(v.quietEnabled),
+    quietStart: Number.isFinite(Number(v.quietStart)) ? Number(v.quietStart) : DEFAULT_QUIET_START,
+    quietEnd: Number.isFinite(Number(v.quietEnd)) ? Number(v.quietEnd) : DEFAULT_QUIET_END,
   };
 }
 
@@ -446,17 +483,22 @@ async function startSweep() {
     running: true,
     paused: false,
     blocked: false,
+    quietPaused: false,
     index: 0,
     sinceBreak: 0,
     consecutiveErrors: 0,
-    targets: cfg.targets,
+    // Randomize order each pass so the query sequence isn't a fixed signature.
+    targets: shuffle(cfg.targets),
     ingestUrl: cfg.ingestUrl,
     stepDelayMs: cfg.stepDelayMs,
     batchSize: cfg.batchSize,
     batchPauseMs: cfg.batchPauseMs,
     cooldownMs: cfg.cooldownMs,
     dripMode: cfg.dripMode,
-    dripWindowMs: cfg.dripWindowMs,
+    dripGapMs: cfg.dripGapMs,
+    quietEnabled: cfg.quietEnabled,
+    quietStart: cfg.quietStart,
+    quietEnd: cfg.quietEnd,
     alertMaxPos: Number(c.alertMaxPos) || 5,
     telegramToken: c.telegramToken || '',
     telegramChatId: c.telegramChatId || '',
@@ -484,6 +526,19 @@ async function stopSweep() {
 async function step() {
   const s = await getSweep();
   if (!s || !s.running) return;
+
+  // Night pause: don't fire any query during quiet hours; resume at quietEnd.
+  if (s.quietEnabled && inQuietHours(new Date(), s.quietStart, s.quietEnd)) {
+    s.quietPaused = true;
+    s.current = null;
+    await setSweep(s);
+    await chrome.alarms.create('next', { when: Date.now() + msUntilQuietEnd(new Date(), s.quietEnd) });
+    return;
+  }
+  if (s.quietPaused) {
+    s.quietPaused = false;
+    await setSweep(s);
+  }
 
   if (s.index >= s.targets.length) {
     s.running = false;
@@ -648,10 +703,9 @@ async function recordAndAdvance(result) {
       );
     }
   } else if (s.dripMode) {
-    // 24/7 drip: spread the whole list evenly across the window, heavily
-    // randomized, so the pace looks human and never bursts.
-    const per = (s.dripWindowMs || DEFAULT_DRIP_WINDOW_H * 3600_000) / Math.max(1, s.targets.length);
-    delayMs = Math.max(DRIP_MIN_GAP_MS, jitter(per));
+    // Slow drip: a fixed human gap between queries (default ~4 min), jittered,
+    // so the pace never bursts. Night pause is enforced in step().
+    delayMs = Math.max(DRIP_MIN_GAP_MS, jitter(s.dripGapMs || DEFAULT_DRIP_GAP_MIN * 60_000));
   } else if (s.batchSize && s.sinceBreak >= s.batchSize) {
     // Scheduled long break so a big list is not one uninterrupted burst.
     delayMs = jitter(s.batchPauseMs || DEFAULT_BATCH_PAUSE_SEC * 1000);
