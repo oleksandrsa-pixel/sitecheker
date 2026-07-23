@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Rank Peek — my-view SERP tracker",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Auto-sweeps your keyword/geo list through Google using YOUR own browser session and reports each tracked domain's real position.",
   "permissions": ["storage", "tabs", "alarms", "notifications"],
   "host_permissions": [

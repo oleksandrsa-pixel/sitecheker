@@ -139,7 +139,9 @@ function buildCsv(rows) {
         .join(','),
     );
   }
-  return `﻿${lines.join('\r\n')}`; // BOM so Excel opens UTF-8/Cyrillic correctly
+  // BOM (UTF-8/Cyrillic) + `sep=,` hint so Excel splits into columns on open
+  // regardless of the machine's list-separator locale.
+  return `﻿sep=,\r\n${lines.join('\r\n')}`;
 }
 
 function getExportRows(cb) {
@@ -244,7 +246,7 @@ function buildCompetitorsCsv(results, ownDomains, topN) {
       );
     });
   }
-  return `﻿${lines.join('\r\n')}`;
+  return `﻿sep=,\r\n${lines.join('\r\n')}`;
 }
 
 $('comp').addEventListener('click', () => {
@@ -421,7 +423,7 @@ const GEO_MAP = {
   india: { gl: 'in', hl: 'en' },
 };
 
-function splitCsvLine(line) {
+function splitCsvLine(line, delim = ',') {
   const out = [];
   let cur = '';
   let inQuotes = false;
@@ -440,7 +442,7 @@ function splitCsvLine(line) {
       }
     } else if (ch === '"') {
       inQuotes = true;
-    } else if (ch === ',') {
+    } else if (ch === delim) {
       out.push(cur);
       cur = '';
     } else {
@@ -449,6 +451,31 @@ function splitCsvLine(line) {
   }
   out.push(cur);
   return out;
+}
+
+// Figure out the delimiter: honour an Excel `sep=;` hint line, else guess from
+// the header (comma / semicolon / tab — European Excel often saves with ';').
+// Returns { delim, headerLine, dataLines }.
+function detectDelimiter(lines) {
+  let rows = lines.slice();
+  rows[0] = rows[0].replace(/^﻿/, ''); // strip BOM
+  let delim = ',';
+  const m = /^sep=(.)\s*$/i.exec(rows[0]);
+  if (m) {
+    delim = m[1];
+    rows = rows.slice(1);
+    rows[0] = (rows[0] || '').replace(/^﻿/, '');
+  } else {
+    const h = rows[0] || '';
+    const counts = {
+      ',': (h.match(/,/g) || []).length,
+      ';': (h.match(/;/g) || []).length,
+      '\t': (h.match(/\t/g) || []).length,
+    };
+    delim = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    if (!counts[delim]) delim = ',';
+  }
+  return { delim, rows };
 }
 
 function hostFromUrl(value) {
@@ -482,10 +509,13 @@ function geoToGlHl(geo, langColumn) {
 // like `Domain,keyword,second keyword,GEO` just works. Duplicate
 // (domain × keyword × gl) rows are collapsed automatically.
 function parseCsvToTargets(text) {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+  const rawLines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+  if (rawLines.length < 2) throw new Error('порожній файл');
+
+  const { delim, rows: lines } = detectDelimiter(rawLines);
   if (lines.length < 2) throw new Error('порожній файл');
 
-  const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const headers = splitCsvLine(lines[0], delim).map((h) => h.trim().toLowerCase());
   const idx = (aliases) => {
     for (const a of aliases) {
       const i = headers.indexOf(a);
@@ -514,7 +544,7 @@ function parseCsvToTargets(text) {
   const seen = new Set();
   let duplicates = 0;
   for (let r = 1; r < lines.length; r += 1) {
-    const c = splitCsvLine(lines[r]);
+    const c = splitCsvLine(lines[r], delim);
     const activeRaw = iActive < 0 ? 'true' : (c[iActive] || '').trim();
     if (!/^(true|1|yes|y|on)$/i.test(activeRaw)) continue;
 

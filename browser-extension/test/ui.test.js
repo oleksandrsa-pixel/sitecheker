@@ -194,6 +194,7 @@ async function main() {
     ok(csv.includes('▲3'), 'R.14 CSV change ▲3 present');
     ok(csv.includes('▼OUT'), 'R.15 CSV change ▼OUT present');
     ok(csv.charCodeAt(0) === 0xfeff, 'R.16 CSV starts with BOM');
+    ok(csv.startsWith('﻿sep=,'), 'R.17 report CSV carries the Excel sep=, hint');
   }
 
   // ---------------------------------------------------------------------
@@ -278,6 +279,23 @@ async function main() {
     let threw = '';
     try { ctx.parseCsvToTargets('keyword,GEO\nfoo,Italy'); } catch (e) { threw = e.message; }
     ok(/Domain/.test(threw), 'P.20 missing Domain throws clear error');
+
+    // Excel friendliness: exports carry a sep=, hint so Excel splits columns
+    ok(outCsv.startsWith('﻿sep=,'), 'P.21 buildCsv starts with BOM + sep=, hint');
+    ok(comp.startsWith('﻿sep=,'), 'P.22 competitors CSV starts with BOM + sep=, hint');
+
+    // Import tolerates the sep= line and semicolon delimiter (re-saved from Excel)
+    const sepCsv = ['sep=,', 'Domain,keyword,GEO', 'foo.it,foo,Italy'].join('\r\n');
+    const sepT = ctx.parseCsvToTargets(sepCsv);
+    ok(sepT.length === 1 && sepT[0].domain === 'foo.it', 'P.23 import skips a leading sep= line');
+
+    const semiCsv = ['Domain;keyword;GEO', 'foo.it;foo;Italy'].join('\n');
+    const semiT = ctx.parseCsvToTargets(semiCsv);
+    ok(semiT.length === 1 && semiT[0].gl === 'it', 'P.24 import auto-detects semicolon delimiter');
+
+    const sepSemi = ['sep=;', 'Domain;keyword;GEO', 'foo.it;foo;Italy'].join('\r\n');
+    const sepSemiT = ctx.parseCsvToTargets(sepSemi);
+    ok(sepSemiT.length === 1 && sepSemiT[0].domain === 'foo.it', 'P.25 import honours sep=; hint');
   }
 
   // ---------------------------------------------------------------------

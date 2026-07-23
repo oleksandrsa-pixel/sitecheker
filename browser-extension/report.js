@@ -322,7 +322,9 @@ function buildPivotCsv() {
     cols.push(fmtTime(r.lastChecked));
     lines.push(cols.map(csvEscape).join(','));
   });
-  return `﻿${lines.join('\r\n')}`; // BOM so Excel reads UTF-8/Cyrillic
+  // BOM (UTF-8/Cyrillic) + `sep=,` hint so Excel splits into columns on open
+  // regardless of the machine's list-separator locale.
+  return `﻿sep=,\r\n${lines.join('\r\n')}`;
 }
 
 function stamp() {
