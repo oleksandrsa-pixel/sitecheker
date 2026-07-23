@@ -74,8 +74,8 @@
     ) {
       return true;
     }
-    const txt = (document.body?.innerText || '').slice(0, 600).toLowerCase();
-    return /unusual traffic|not a robot|our systems have detected|незвичайний трафік|незвичний трафік|підозрілий трафік|подозрительный трафик|необычный трафик/.test(
+    const txt = (document.body?.innerText || '').slice(0, 800).toLowerCase();
+    return /unusual traffic|not a robot|our systems have detected|does not have permission|client does not have|that.{0,3}s an error|незвичайний трафік|незвичний трафік|підозрілий трафік|подозрительный трафик|необычный трафик/.test(
       txt,
     );
   }

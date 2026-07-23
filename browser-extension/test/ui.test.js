@@ -386,6 +386,29 @@ async function main() {
     await flush();
     ok(sent2.some((m) => m.type === 'rankpeek:blocked'), 'C.6 block message sent on "unusual traffic"');
     ok(!sent2.some((m) => m.type === 'rankpeek:serp'), 'C.7 no serp message when blocked');
+
+    // Hard IP 403 page (served on /search itself, no /sorry redirect)
+    const sent3 = [];
+    let ifn3 = null;
+    const doc3 = {
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => makeEl(),
+      documentElement: makeEl(),
+      body: { innerText: "403. That's an error. Your client does not have permission to get URL /search?q=... from this server. That's all we know." },
+    };
+    loadFile('content.js', {
+      chrome: { storage: { local: makeStorage({}).local }, runtime: { sendMessage: (m) => sent3.push(m) } },
+      document: doc3,
+      location: { href: 'https://www.google.com/search?q=x', pathname: '/search' },
+      setInterval: (fn) => { ifn3 = fn; return 1; },
+      clearInterval: () => {},
+      setTimeout: () => 0,
+    });
+    await ifn3();
+    await flush();
+    ok(sent3.some((m) => m.type === 'rankpeek:blocked'), 'C.8 block detected on hard 403 "does not have permission" page');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
