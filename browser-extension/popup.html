@@ -1,0 +1,300 @@
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: #0f1220;
+    --card: #171a2b;
+    --line: #262a41;
+    --txt: #e7e9f3;
+    --muted: #9aa0bd;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --accent: #6366f1;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    width: 430px;
+    margin: 0;
+    padding: 14px;
+    font: 13px/1.45 system-ui, -apple-system, sans-serif;
+    color: var(--txt);
+    background: var(--bg);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .logo {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+  .logo small {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 11px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #2a2f4a;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .badge.run {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+  }
+  .badge.auto {
+    background: rgba(52, 211, 153, 0.15);
+    color: var(--green);
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .btn {
+    flex: 1;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    color: #fff;
+  }
+  .btn-run {
+    background: var(--green);
+    color: #06281c;
+  }
+  .btn-stop {
+    background: #3a2030;
+    color: var(--red);
+  }
+  .btn-ghost {
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .status {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    min-height: 16px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--line);
+    font-size: 11.5px;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  tr:last-child td {
+    border-bottom: 0;
+  }
+  .site {
+    font-weight: 600;
+  }
+  .kw,
+  .geo,
+  .when {
+    color: var(--muted);
+  }
+  .when {
+    font: 11px ui-monospace, Consolas, monospace;
+    white-space: nowrap;
+  }
+  .pill {
+    display: inline-block;
+    min-width: 30px;
+    text-align: center;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-weight: 700;
+    font: 11px ui-monospace, Consolas, monospace;
+  }
+  .p-good {
+    background: rgba(52, 211, 153, 0.16);
+    color: var(--green);
+  }
+  .p-mid {
+    background: rgba(251, 191, 36, 0.16);
+    color: var(--amber);
+  }
+  .p-bad {
+    background: rgba(248, 113, 113, 0.16);
+    color: var(--red);
+  }
+  details {
+    margin-top: 12px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 12px;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--txt);
+    outline: none;
+  }
+  .hint {
+    color: var(--muted);
+    margin: 8px 0 3px;
+    font-size: 11.5px;
+  }
+  input,
+  textarea {
+    width: 100%;
+    background: #0d1020;
+    color: var(--txt);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: 11.5px ui-monospace, Consolas, monospace;
+  }
+  input[type='checkbox'] {
+    width: auto;
+  }
+  textarea {
+    height: 130px;
+  }
+  .row-btns {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+  }
+  .row-btns button {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .row-btns button.sec {
+    background: transparent;
+    color: var(--muted);
+  }
+  .msg {
+    min-height: 16px;
+    margin-top: 5px;
+    font-size: 11.5px;
+  }
+  .guide li {
+    margin: 4px 0;
+    color: var(--muted);
+  }
+  .guide b {
+    color: var(--txt);
+  }
+  code {
+    background: #0d1020;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+</style>
+
+<header>
+  <div class="logo">🔎 Rank Peek <small>my-view tracker</small></div>
+  <span id="badge" class="badge">—</span>
+</header>
+
+<div class="actions">
+  <button id="run" class="btn btn-run">▶ Прохід</button>
+  <button id="stop" class="btn btn-stop">■ Стоп</button>
+</div>
+<div class="actions" style="margin-top: -4px">
+  <button id="csv" class="btn btn-ghost" style="flex: 1">⭳ CSV</button>
+  <button id="comp" class="btn btn-ghost" style="flex: 1">⭳ Конкуренти</button>
+  <button id="export" class="btn btn-ghost" style="flex: 1">⭳ JSON</button>
+</div>
+
+<div id="status" class="status">—</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Сайт</th>
+      <th>Кейворд</th>
+      <th>Гео</th>
+      <th>Поз.</th>
+      <th>Остання перевірка</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<details open>
+  <summary>📣 Telegram-алерти + авто-прохід</summary>
+  <p class="hint">Bot token (від @BotFather):</p>
+  <input id="tgtoken" type="text" placeholder="123456789:ABCdef..." />
+  <p class="hint">Chat ID:</p>
+  <input id="tgchat" type="text" placeholder="напр. 630891719" />
+  <p class="hint">Алерт, якщо сайт випав нижче топ-N (або зник):</p>
+  <input id="maxpos" type="number" min="1" step="1" placeholder="5" />
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="auto" type="checkbox" /> Авто-прохід кожні
+    <input id="hours" type="number" min="1" step="1" value="4" style="width: 52px" /> год
+  </label>
+  <div class="row-btns">
+    <button id="savetg">Зберегти + увімкнути</button>
+    <button id="testtg" class="sec">Тест Telegram</button>
+  </div>
+  <div id="tgmsg" class="msg"></div>
+</details>
+
+<details>
+  <summary>📄 Список сайтів (CSV / JSON)</summary>
+  <p class="hint"><b>Завантажити CSV</b> (GEO, Brand, Domain, keyword, second keyword, …):</p>
+  <input id="csvfile" type="file" accept=".csv,text/csv" />
+  <div id="csvmsg" class="msg"></div>
+  <p class="hint">Пауза між запитами, сек (менше = швидше, вищий ризик CAPTCHA):</p>
+  <input id="delay" type="number" min="3" step="1" placeholder="15" />
+  <p class="hint">Ingest URL (опційно, для бекенд-пайплайну):</p>
+  <input id="ingest" type="text" placeholder="http://127.0.0.1:33000/ingest/serp" />
+  <p class="hint">Цілі (JSON, автозаповнюється з CSV):</p>
+  <textarea id="targets" spellcheck="false"></textarea>
+  <div class="row-btns"><button id="save">Зберегти</button></div>
+  <div id="msg" class="msg"></div>
+</details>
+
+<details>
+  <summary>❓ Як це працює</summary>
+  <ol class="guide">
+    <li><b>Завантаж CSV</b> зі своїми сайтами (розділ «Список сайтів»).</li>
+    <li>Встав <b>Telegram token + Chat ID</b>, увімкни <b>авто-прохід</b>.</li>
+    <li><b>▶ Прохід</b> — розширення відкриває Google по кожному кейворду у
+      <b>твоєму</b> браузері (твоя сесія + гео) і читає позицію з екрана.</li>
+    <li>Далі саме кожні <b>N год</b> проганяє все і порівнює з минулим разом.</li>
+    <li>Якщо сайт <b>випав нижче топ-N або зник</b> → миттєвий <b>Telegram-алерт</b>.</li>
+  </ol>
+  <p class="hint">Chrome має бути відкритий. Гео = параметр <code>gl</code> з твого IP.</p>
+</details>
+
+<script src="popup.js"></script>
