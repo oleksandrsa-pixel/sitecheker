@@ -18,12 +18,29 @@
 ## Авто-прохід (головне)
 
 1. Клікни іконку розширення → відкриється popup.
-2. Список сайтів — розгорни **Налаштування** → **Завантажити CSV** і кинь свій файл у
-   форматі `GEO, Brand, Domain, keyword, second keyword, location_name, language_code,
-   depth, is_active`. Розширення саме: візьме тільки `is_active=TRUE`, витягне hostname з
-   URL, розгорне `keyword` + `second keyword` в окремі цілі, змапить країну → `gl/hl`
-   (Italy→it, Greece→gr/el, France→fr, Spain→es, Portugal→pt, Brazil→br/pt-BR, …).
-   Кожен новий CSV просто перезаписує список. (Або редагуй цілі як JSON вручну.)
+2. Список сайтів — розгорни **Список сайтів (CSV / JSON)** → **Завантажити CSV** і кинь
+   свій файл. **Досить 4 колонок:**
+
+   ```
+   Domain,keyword,second keyword,GEO
+   https://zoccer-online-casino.com/es-es/,zoccer,zoccer casino,Spain
+   magneticslotcasino.com,magneticslots,magneticslots casino,Portugal
+   ```
+
+   Обов'язкові тільки **Domain** і **keyword** (+ **GEO** або `language_code`, щоб знати
+   яку країну питати). Решта — необов'язкові:
+   - **Brand** — лише підпис у таблиці; якщо колонки нема, візьму з `keyword`.
+   - **second keyword** — друга ціль по тому ж сайту.
+   - `is_active` — якщо є, беру лише `TRUE`; якщо колонки нема — всі активні.
+   - `location_name`, `language_code`, `depth` — з повного формату теж читаються
+     (depth ігнорується); повний експорт-CSV трекера заливається без змін.
+
+   Розширення саме: витягне hostname з URL, розгорне `keyword` + `second keyword` в
+   окремі цілі, змапить країну → `gl/hl` (Italy→it, Greece→gr/el, France→fr, Spain→es,
+   Portugal→pt, Brazil→br/pt-BR, …; також приймає 2-літерний код країни), і **прибере
+   дублі** (той самий домен×кейворд×країна рахується один раз). Заголовки — будь-яким
+   регістром, є синоніми (`url`/`website` = Domain, `country`/`location` = GEO, `kw` =
+   keyword…). Кожен новий CSV перезаписує список. (Або редагуй цілі як JSON вручну.)
 3. Натисни **▶ Запустити прохід**.
 4. Розширення по черзі відкриває фонові вкладки Google (не крадуть фокус), зчитує позицію,
    закриває, робить паузу (дефолт ~20 с + рандом, плюс довга пауза кожні 20 запитів), іде

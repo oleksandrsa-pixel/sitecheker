@@ -251,6 +251,33 @@ async function main() {
       5,
     );
     ok(comp.includes('rival.com') && !comp.includes('trustpilot.com') && !/(^|,)a\.com(,|$)/m.test(comp.split('\n').slice(1).join('\n')), 'P.12 competitors excludes own + noise, keeps rival');
+
+    // Minimal 4-column format (no Brand) + dedupe
+    const minCsv = [
+      'Domain,keyword,second keyword,GEO',
+      'https://zoccer-online-casino.com/es-es/,zoccer,zoccer casino,Spain',
+      'https://zoccer-online-casino.com/es-es/,zoccer,zoccer casino,Spain', // exact dup
+      'magneticslotcasino.com,magneticslots,,Portugal',
+    ].join('\n');
+    const minT = ctx.parseCsvToTargets(minCsv);
+    ok(minT.length === 3, 'P.13 minimal format: 2 zoccer targets + 1 magneticslots (dup collapsed)', String(minT.length));
+    ok(minT.duplicatesRemoved === 2, 'P.14 duplicatesRemoved counts the repeated row (2 kw)', String(minT.duplicatesRemoved));
+    ok(minT.every((t) => t.site && t.gl && t.hl), 'P.15 site auto-derived + gl/hl set without Brand');
+    ok(minT.find((t) => t.domain === 'zoccer-online-casino.com').site === 'Zoccer', 'P.16 site derived from keyword (Zoccer)');
+    ok(minT.find((t) => t.domain === 'magneticslotcasino.com').gl === 'pt', 'P.17 GEO Portugal -> gl pt');
+
+    // 2-letter geo code accepted
+    ok(JSON.stringify(ctx.geoToGlHl('es')) === JSON.stringify({ gl: 'es', hl: 'es' }), 'P.18 bare country code es -> es/es');
+
+    // header aliases (url + country)
+    const aliasCsv = ['url,keyword,country', 'foo.it,foo,Italy'].join('\n');
+    const aliasT = ctx.parseCsvToTargets(aliasCsv);
+    ok(aliasT.length === 1 && aliasT[0].domain === 'foo.it' && aliasT[0].gl === 'it', 'P.19 header aliases url/country work');
+
+    // missing required column -> clear error
+    let threw = '';
+    try { ctx.parseCsvToTargets('keyword,GEO\nfoo,Italy'); } catch (e) { threw = e.message; }
+    ok(/Domain/.test(threw), 'P.20 missing Domain throws clear error');
   }
 
   // ---------------------------------------------------------------------

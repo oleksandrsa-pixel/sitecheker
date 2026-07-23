@@ -276,7 +276,11 @@
 
 <details>
   <summary>📄 Список сайтів (CSV / JSON)</summary>
-  <p class="hint"><b>Завантажити CSV</b> (GEO, Brand, Domain, keyword, second keyword, …):</p>
+  <p class="hint">
+    <b>Завантажити CSV.</b> Досить 4 колонок: <code>Domain,keyword,second keyword,GEO</code>.
+    Brand — необов'язково (візьму з keyword). Повний формат (Brand, location_name,
+    language_code, depth…) теж працює. Дублі прибираються автоматично.
+  </p>
   <input id="csvfile" type="file" accept=".csv,text/csv" />
   <div id="csvmsg" class="msg"></div>
   <p class="hint">Пауза між запитами, сек (менше = швидше, вищий ризик CAPTCHA):</p>

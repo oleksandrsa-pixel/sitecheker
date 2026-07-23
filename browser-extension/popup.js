@@ -462,54 +462,87 @@ function hostFromUrl(value) {
   }
 }
 
+function titleCase(s) {
+  const t = (s || '').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
 function geoToGlHl(geo, langColumn) {
   const key = (geo || '').trim().toLowerCase();
   if (GEO_MAP[key]) return GEO_MAP[key];
   const lang = (langColumn || '').trim().toLowerCase();
+  // Accept a bare 2-letter country code (e.g. "es", "it") as gl.
+  if (/^[a-z]{2}$/.test(key)) return { gl: key, hl: lang || key };
   return { gl: lang || 'us', hl: lang || 'en' }; // best-effort fallback
 }
 
+// Minimal required columns: Domain + keyword (+ a GEO or language_code so we
+// know which Google to query). Everything else is optional. Header names are
+// matched case-insensitively and accept common aliases, so a hand-made file
+// like `Domain,keyword,second keyword,GEO` just works. Duplicate
+// (domain × keyword × gl) rows are collapsed automatically.
 function parseCsvToTargets(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
   if (lines.length < 2) throw new Error('порожній файл');
 
   const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
-  const col = (name) => headers.indexOf(name);
-  const iGeo = col('geo');
-  const iBrand = col('brand');
-  const iDomain = col('domain');
-  const iKw = col('keyword');
-  const iKw2 = col('second keyword');
-  const iLoc = col('location_name');
-  const iLang = col('language_code');
-  const iActive = col('is_active');
+  const idx = (aliases) => {
+    for (const a of aliases) {
+      const i = headers.indexOf(a);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const iGeo = idx(['geo', 'country', 'location', 'location_name']);
+  const iBrand = idx(['brand', 'name', 'brand name', 'brand_name']);
+  const iDomain = idx(['domain', 'url', 'website', 'link', 'site_url', 'site url']);
+  const iKw = idx(['keyword', 'key', 'kw', 'keyword1', 'main keyword', 'main_keyword']);
+  const iKw2 = idx([
+    'second keyword', 'second_keyword', 'keyword2', 'kw2', 'second key', 'additional keyword', 'extra keyword',
+  ]);
+  const iLang = idx(['language_code', 'lang', 'language', 'hl']);
+  const iActive = idx(['is_active', 'active', 'enabled']);
 
-  if (iBrand < 0 || iDomain < 0 || iKw < 0) {
-    throw new Error('потрібні колонки Brand, Domain, keyword');
+  if (iDomain < 0 || iKw < 0) {
+    throw new Error('потрібні щонайменше колонки Domain і keyword');
+  }
+  if (iGeo < 0 && iLang < 0) {
+    throw new Error('додай колонку GEO (країна) або language_code');
   }
 
   const targets = [];
+  const seen = new Set();
+  let duplicates = 0;
   for (let r = 1; r < lines.length; r += 1) {
     const c = splitCsvLine(lines[r]);
     const activeRaw = iActive < 0 ? 'true' : (c[iActive] || '').trim();
     if (!/^(true|1|yes|y|on)$/i.test(activeRaw)) continue;
 
-    const site = (c[iBrand] || '').trim();
     const domain = hostFromUrl(c[iDomain]);
-    const geo = ((iGeo >= 0 ? c[iGeo] : '') || (iLoc >= 0 ? c[iLoc] : '') || '').trim();
+    const mainKw = (c[iKw] || '').trim();
+    const geo = (iGeo >= 0 ? c[iGeo] || '' : '').trim();
     const { gl, hl } = geoToGlHl(geo, iLang >= 0 ? c[iLang] : '');
+    // Brand is just a display label — default to the keyword (or domain).
+    const brand = iBrand >= 0 ? (c[iBrand] || '').trim() : '';
+    const site = brand || titleCase(mainKw) || domain;
 
-    const keywords = [(c[iKw] || '').trim()];
+    const keywords = [mainKw];
     if (iKw2 >= 0 && (c[iKw2] || '').trim()) keywords.push((c[iKw2] || '').trim());
 
     for (const keyword of keywords) {
-      if (site && domain && keyword && gl && hl) {
-        targets.push({ site, domain, keyword, gl, hl, geo: geo || gl.toUpperCase() });
+      if (!domain || !keyword || !gl || !hl) continue;
+      const dedupeKey = `${domain}|${keyword.toLowerCase()}|${gl}`;
+      if (seen.has(dedupeKey)) {
+        duplicates += 1;
+        continue;
       }
+      seen.add(dedupeKey);
+      targets.push({ site, domain, keyword, gl, hl, geo: geo || gl.toUpperCase() });
     }
   }
 
   if (targets.length === 0) throw new Error('не знайдено активних рядків');
+  targets.duplicatesRemoved = duplicates; // annotation for the import message
   return targets;
 }
 
@@ -524,7 +557,10 @@ $('csvfile').addEventListener('change', (e) => {
       chrome.storage.local.set({ sweepTargets: targets, targets: overlayDomains }, () => {
         $('targets').value = JSON.stringify(targets, null, 2);
         $('csvmsg').style.color = '#16a34a';
-        $('csvmsg').textContent = `Завантажено ✓ ${overlayDomains.length} сайтів, ${targets.length} цілей`;
+        const dup = targets.duplicatesRemoved
+          ? ` (−${targets.duplicatesRemoved} дублів)`
+          : '';
+        $('csvmsg').textContent = `Завантажено ✓ ${overlayDomains.length} сайтів, ${targets.length} цілей${dup}`;
       });
     } catch (err) {
       $('csvmsg').style.color = '#dc2626';
