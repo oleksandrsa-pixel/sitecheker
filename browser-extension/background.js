@@ -113,6 +113,53 @@ async function sendTelegram(token, chatId, text) {
   }
 }
 
+// Split a long Telegram message into <=limit chunks on line boundaries.
+async function sendTelegramChunked(token, chatId, text) {
+  const LIMIT = 3500;
+  if (text.length <= LIMIT) return sendTelegram(token, chatId, text);
+  const lines = text.split('\n');
+  let buf = '';
+  for (const ln of lines) {
+    if ((buf + '\n' + ln).length > LIMIT && buf) {
+      await sendTelegram(token, chatId, buf);
+      buf = ln;
+    } else {
+      buf = buf ? buf + '\n' + ln : ln;
+    }
+  }
+  if (buf) await sendTelegram(token, chatId, buf);
+  return true;
+}
+
+// Short human-readable "now" for message footers.
+function fmtNow() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Compact trend marker comparing a previous position to the current one.
+// Lower number = better rank, so cur < prev means improvement.
+function trendText(prev, cur) {
+  if (prev === undefined) return '🆕';
+  if (cur == null) return prev == null ? '(досі поза)' : `🔴 впав із #${prev}`;
+  if (prev == null) return '🟢 повернувся';
+  if (cur < prev) return `🟢▲${prev - cur}`;
+  if (cur > prev) return `🔴▼${cur - prev}`;
+  return '=';
+}
+
+// Latest history entry that is at least `agoMs` old (e.g. ~24h ago).
+function positionAround(hist, agoMs) {
+  const cutoff = Date.now() - agoMs;
+  let found;
+  for (const h of hist) {
+    const t = new Date(h.at).getTime();
+    if (!Number.isNaN(t) && t <= cutoff) found = h;
+  }
+  return found ? found.pos : undefined;
+}
+
 // Decide whether a result crossed the alert threshold vs the previous sweep and,
 // if so, push a per-site Telegram message. Persists last position per target.
 async function maybeAlert(s, result) {
@@ -151,24 +198,107 @@ async function maybeAlert(s, result) {
   if (msg) await sendTelegram(s.telegramToken, s.telegramChatId, msg);
 }
 
+// One day in ms — the window used for the "yesterday" comparison.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HISTORY_CAP = 60; // keep the last N readings per target
+
 // Persist the last check (position + timestamp) per target so the popup and the
-// report page can show "last run" for each site even between sweeps.
+// report page can show "last run" for each site even between sweeps. Also keep a
+// rolling per-target history so the report can show previous / yesterday /
+// trend, and store those derived values on the check for convenience.
 async function updateLastCheck(result) {
   const key = `${result.domain}|${result.keyword}|${result.gl}`;
-  const store = (await chrome.storage.local.get('lastChecks')).lastChecks || {};
+  const data = await chrome.storage.local.get(['lastChecks', 'history']);
+  const checks = data.lastChecks || {};
+  const histAll = data.history || {};
+  const hist = histAll[key] || [];
+  const base = checks[key] || {};
+
+  // Computed from the history that existed BEFORE this reading is appended.
+  const prevEntry = hist.length ? hist[hist.length - 1] : null;
+  const prevPosition = prevEntry ? prevEntry.pos : undefined;
+  const yesterdayPosition = positionAround(hist, DAY_MS);
+
   const top1 = (result.topResults && result.topResults[0] && result.topResults[0].host) || null;
-  store[key] = {
+
+  checks[key] = {
     site: result.site,
     keyword: result.keyword,
     geo: result.geo,
     domain: result.domain,
     gl: result.gl,
     position: result.position,
-    top1,
+    top1: result.error ? base.top1 ?? null : top1,
     checkedAt: result.collectedAt,
     error: result.error || null,
+    // On an error we didn't get a new reading — keep the last known trend refs.
+    prevPosition: result.error ? base.prevPosition : prevPosition,
+    yesterdayPosition: result.error ? base.yesterdayPosition : yesterdayPosition,
   };
-  await chrome.storage.local.set({ lastChecks: store });
+
+  if (result.error) {
+    await chrome.storage.local.set({ lastChecks: checks });
+    return;
+  }
+
+  hist.push({ pos: result.position ?? null, at: result.collectedAt });
+  if (hist.length > HISTORY_CAP) hist.splice(0, hist.length - HISTORY_CAP);
+  histAll[key] = hist;
+  await chrome.storage.local.set({ lastChecks: checks, history: histAll });
+}
+
+// After a full sweep, send a Telegram digest of EVERY site currently out of
+// top-N (with trend vs the previous sweep), so the reminder repeats each run —
+// not only on the one sweep where the site first dropped. Governed by the
+// `digestEveryRun` setting (default ON).
+async function sendSweepDigest(s) {
+  if (!s.telegramToken || !s.telegramChatId) return;
+  const v = await chrome.storage.local.get(['digestEveryRun', 'lastChecks']);
+  if (v.digestEveryRun === false) return;
+  const checks = v.lastChecks || {};
+  const maxPos = s.alertMaxPos ?? 5;
+
+  const ok = s.results.filter((r) => !r.error);
+  const bad = ok.filter((r) => r.position == null || r.position > maxPos);
+  const inTop = ok.length - bad.length;
+
+  if (ok.length === 0) {
+    await sendTelegram(
+      s.telegramToken,
+      s.telegramChatId,
+      `⚠ <b>Rank Peek</b> — прохід завершено, але результатів нема ` +
+        `(${s.results.length} помилок/блокувань).\n🕒 ${fmtNow()}`,
+    );
+    return;
+  }
+
+  if (bad.length === 0) {
+    await sendTelegram(
+      s.telegramToken,
+      s.telegramChatId,
+      `✅ <b>Rank Peek</b> — прохід завершено.\n` +
+        `Усі ${inTop} цілей у топ-${maxPos}. Проблемних нема.\n🕒 ${fmtNow()}`,
+    );
+    return;
+  }
+
+  bad.sort((a, b) => {
+    const pa = a.position == null ? 1e9 : a.position;
+    const pb = b.position == null ? 1e9 : b.position;
+    return pb - pa; // OUT first, then worst rank first
+  });
+
+  const lines = bad.map((r) => {
+    const lc = checks[`${r.domain}|${r.keyword}|${r.gl}`] || {};
+    const curTxt = r.position == null ? 'OUT' : `#${r.position}`;
+    return `• <b>${r.site}</b> · ${r.geo} · «${r.keyword}» — ${curTxt} ${trendText(lc.prevPosition, r.position)}`;
+  });
+
+  const msg =
+    `⚠ <b>Rank Peek</b> — поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})\n` +
+    lines.join('\n') +
+    `\n🕒 ${fmtNow()}`;
+  await sendTelegramChunked(s.telegramToken, s.telegramChatId, msg);
 }
 
 // ---- Scheduling ------------------------------------------------------------
@@ -256,6 +386,7 @@ async function step() {
     } catch {
       /* notifications optional */
     }
+    await sendSweepDigest(s); // recurring per-sweep reminder of all out-of-top sites
     return;
   }
 

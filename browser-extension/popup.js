@@ -33,6 +33,7 @@ function loadConfig() {
       'telegramToken',
       'telegramChatId',
       'alertMaxPos',
+      'digestEveryRun',
       'autoSchedule',
       'scheduleHours',
     ],
@@ -47,6 +48,7 @@ function loadConfig() {
       $('tgtoken').value = v.telegramToken || '';
       $('tgchat').value = v.telegramChatId || '';
       $('maxpos').value = v.alertMaxPos || 5;
+      $('digest').checked = v.digestEveryRun !== false; // default ON
       $('auto').checked = Boolean(v.autoSchedule);
       $('hours').value = v.scheduleHours || 4;
     },
@@ -349,6 +351,7 @@ $('savetg').addEventListener('click', () => {
     telegramToken: $('tgtoken').value.trim(),
     telegramChatId: $('tgchat').value.trim(),
     alertMaxPos: Math.max(1, Number($('maxpos').value) || 5),
+    digestEveryRun: $('digest').checked,
     autoSchedule: $('auto').checked,
     scheduleHours: Math.max(1, Number($('hours').value) || 4),
   };

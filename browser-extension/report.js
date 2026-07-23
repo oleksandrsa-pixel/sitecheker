@@ -28,14 +28,51 @@ function pill(cell) {
   return `<span class="pill ${cls}"${t}>#${cell.position}</span>`;
 }
 
+// Baseline for the trend arrow: the position ~24h ago if we have it, otherwise
+// the previous sweep. Returns { base, label } where base may be number|null|undefined.
+function trendBase(cell) {
+  if (cell.yesterdayPosition !== undefined) return { base: cell.yesterdayPosition, label: 'вчора' };
+  if (cell.prevPosition !== undefined) return { base: cell.prevPosition, label: 'мин.' };
+  return { base: undefined, label: '' };
+}
+
+// Colored arrow showing movement vs the baseline (lower rank number = better).
+function trendHtml(cell) {
+  const { base } = trendBase(cell);
+  const cur = cell.position;
+  if (base === undefined) return '<span class="tr new" title="перша перевірка">🆕</span>';
+  if (cur == null) {
+    return base == null ? '' : '<span class="tr down" title="випав із видачі">▼OUT</span>';
+  }
+  if (base == null) return '<span class="tr up" title="повернувся у видачу">↩</span>';
+  if (cur < base) return `<span class="tr up" title="покращення на ${base - cur}">▲${base - cur}</span>`;
+  if (cur > base) return `<span class="tr down" title="падіння на ${cur - base}">▼${cur - base}</span>`;
+  return '<span class="tr flat" title="без змін">=</span>';
+}
+
+// Small "yesterday: #N" reference line under the pill.
+function prevLine(cell) {
+  const y = cell.yesterdayPosition;
+  if (y === undefined) return '<div class="prev">вчора: —</div>';
+  return `<div class="prev">вчора: ${y == null ? 'OUT' : '#' + y}</div>`;
+}
+
+// Recent history as a tooltip string, e.g. "#5 → #5 → #4 → #3".
+function histTitle(cell) {
+  if (!cell.hist || !cell.hist.length) return '';
+  const s = cell.hist.map((p) => (p == null ? 'OUT' : '#' + p)).join(' → ');
+  return ` title="історія: ${s}"`;
+}
+
 // State kept in memory so search/filter/sort don't re-hit storage.
 let ROWS = []; // [{ site, domain, geo, gl, lastChecked, keywords: [{keyword, position, error, top1, checkedAt}] }]
 let MAX_KW = 0;
 let sortKey = 'site';
 let sortDir = 1;
 
-// Build the pivot from lastChecks (+ sweepTargets for keyword ordering).
-function buildRows(lastChecks, sweepTargets) {
+// Build the pivot from lastChecks (+ sweepTargets for keyword ordering, +
+// history for the per-cell trend / "yesterday" reference).
+function buildRows(lastChecks, sweepTargets, historyAll) {
   // Preferred keyword order per site (main keyword first, as stored in targets).
   const order = new Map(); // `${domain}|${gl}` -> [keyword, ...]
   (Array.isArray(sweepTargets) ? sweepTargets : []).forEach((t) => {
@@ -46,8 +83,9 @@ function buildRows(lastChecks, sweepTargets) {
     if (!arr.includes(t.keyword)) arr.push(t.keyword);
   });
 
+  const hist = historyAll || {};
   const groups = new Map(); // `${domain}|${gl}` -> row
-  Object.values(lastChecks || {}).forEach((c) => {
+  Object.entries(lastChecks || {}).forEach(([key, c]) => {
     if (!c || !c.domain) return;
     const gl = c.gl || '';
     const gkey = `${registrable(c.domain)}|${gl}`;
@@ -68,6 +106,9 @@ function buildRows(lastChecks, sweepTargets) {
       error: c.error || null,
       top1: c.top1 || null,
       checkedAt: c.checkedAt || '',
+      prevPosition: c.prevPosition,
+      yesterdayPosition: c.yesterdayPosition,
+      hist: (hist[key] || []).slice(-8).map((h) => h.pos),
     });
     if (c.checkedAt && (!row.lastChecked || c.checkedAt > row.lastChecked)) {
       row.lastChecked = c.checkedAt;
@@ -183,7 +224,11 @@ function renderBody(view) {
         const c = r.keywords[i];
         kwCells.push(
           `<td class="kwcell">${
-            c ? `<div class="kw" title="${c.keyword}">${c.keyword}</div>${pill(c)}` : '<span class="pill p-none">—</span>'
+            c
+              ? `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
+                `<div class="poscell"${histTitle(c)}>${pill(c)}${trendHtml(c)}</div>` +
+                prevLine(c)
+              : '<span class="pill p-none">—</span>'
           }</td>`,
         );
       }
@@ -242,16 +287,37 @@ function posText(c) {
   return c.position;
 }
 
+function yesterdayText(cell) {
+  if (!cell) return '';
+  const y = cell.yesterdayPosition;
+  if (y === undefined) return '';
+  return y == null ? 'OUT' : `#${y}`;
+}
+
+function deltaText(cell) {
+  if (!cell) return '';
+  const { base } = trendBase(cell);
+  const cur = cell.position;
+  if (base === undefined) return 'new';
+  if (cur == null) return base == null ? '' : '▼OUT';
+  if (base == null) return '↩';
+  if (cur < base) return `▲${base - cur}`;
+  if (cur > base) return `▼${cur - base}`;
+  return '=';
+}
+
 function buildPivotCsv() {
   const header = ['Сайт', 'Домен', 'Гео'];
-  for (let i = 0; i < MAX_KW; i += 1) header.push(`Кейворд ${i + 1}`, `Позиція ${i + 1}`);
+  for (let i = 0; i < MAX_KW; i += 1) {
+    header.push(`Кейворд ${i + 1}`, `Позиція ${i + 1}`, `Вчора ${i + 1}`, `Зміна ${i + 1}`);
+  }
   header.push('Остання перевірка');
   const lines = [header.map(csvEscape).join(',')];
   ROWS.forEach((r) => {
     const cols = [r.site, r.domain, r.geo];
     for (let i = 0; i < MAX_KW; i += 1) {
       const c = r.keywords[i];
-      cols.push(c ? c.keyword : '', posText(c));
+      cols.push(c ? c.keyword : '', posText(c), yesterdayText(c), deltaText(c));
     }
     cols.push(fmtTime(r.lastChecked));
     lines.push(cols.map(csvEscape).join(','));
@@ -280,8 +346,8 @@ $('csv').addEventListener('click', () => {
 });
 
 function load() {
-  chrome.storage.local.get(['lastChecks', 'sweepTargets'], (v) => {
-    ROWS = buildRows(v.lastChecks || {}, v.sweepTargets || []);
+  chrome.storage.local.get(['lastChecks', 'sweepTargets', 'history'], (v) => {
+    ROWS = buildRows(v.lastChecks || {}, v.sweepTargets || [], v.history || {});
     renderCards();
     populateGeo();
     applyView();
