@@ -49,6 +49,16 @@ const matchHost = (host, target) => {
   const t = registrable(target);
   return Boolean(h) && Boolean(t) && (h === t || h.endsWith('.' + t));
 };
+
+// Aggregators / platforms that are not direct competitors — filtered out of the
+// per-target competitor list.
+const NOISE = [
+  'wikipedia.org', 'trustpilot.com', 'google.com', 'apps.apple.com', 'youtube.com',
+  'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'tiktok.com',
+  'linkedin.com', 'pinterest.com', 'tripadvisor.com',
+];
+const isNoise = (host) => NOISE.some((n) => matchHost(host, n));
+const isOwn = (host, ownDomains) => (ownDomains || []).some((d) => matchHost(host, d));
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Random jitter so gaps between queries never look mechanical (±35%).
@@ -213,7 +223,7 @@ const HISTORY_CAP = 60; // keep the last N readings per target
 // report page can show "last run" for each site even between sweeps. Also keep a
 // rolling per-target history so the report can show previous / yesterday /
 // trend, and store those derived values on the check for convenience.
-async function updateLastCheck(result) {
+async function updateLastCheck(result, ownDomains = []) {
   const key = `${result.domain}|${result.keyword}|${result.gl}`;
   const data = await chrome.storage.local.get(['lastChecks', 'history']);
   const checks = data.lastChecks || {};
@@ -228,6 +238,13 @@ async function updateLastCheck(result) {
 
   const top1 = (result.topResults && result.topResults[0] && result.topResults[0].host) || null;
 
+  // Top competitors for this query = organic results minus our own domains and
+  // aggregator noise. Kept per target so the Competitors tab can show them.
+  const competitors = (result.topResults || [])
+    .filter((x) => x && x.host && !isOwn(x.host, ownDomains) && !isNoise(x.host))
+    .slice(0, 5)
+    .map((x) => ({ position: x.position, host: x.host, title: x.title || '', url: x.url || '' }));
+
   checks[key] = {
     site: result.site,
     keyword: result.keyword,
@@ -236,6 +253,7 @@ async function updateLastCheck(result) {
     gl: result.gl,
     position: result.position,
     top1: result.error ? base.top1 ?? null : top1,
+    competitors: result.error ? base.competitors || [] : competitors,
     checkedAt: result.collectedAt,
     error: result.error || null,
     // On an error we didn't get a new reading — keep the last known trend refs.
@@ -372,11 +390,20 @@ async function sendDailyDigest() {
   const bad = ok.filter((c) => c.position == null || c.position > maxPos);
   const inTop = ok.length - bad.length;
 
+  // Freshness: targets not checked in the last ~26h (laptop asleep / CAPTCHA /
+  // never reached). Honest note so a stale report isn't mistaken for "all good".
+  const staleCut = Date.now() - 26 * 60 * 60 * 1000;
+  const stale = checks.filter((c) => {
+    const t = c.checkedAt ? new Date(c.checkedAt).getTime() : NaN;
+    return Number.isNaN(t) || t < staleCut || c.error;
+  }).length;
+  const staleLine = stale ? `\n⚠ ${stale} цілей не перевірено за добу (сон/блокування).` : '';
+
   if (bad.length === 0) {
     await sendTelegram(
       cfg.telegramToken,
       cfg.telegramChatId,
-      `☀️ <b>Rank Peek</b> — щоденний звіт\nУсі ${inTop} цілей у топ-${maxPos}. Проблемних нема.\n🕒 ${fmtNow()}`,
+      `☀️ <b>Rank Peek</b> — щоденний звіт\nУсі ${inTop} цілей у топ-${maxPos}. Проблемних нема.${staleLine}\n🕒 ${fmtNow()}`,
     );
     return;
   }
@@ -395,7 +422,7 @@ async function sendDailyDigest() {
 
   const msg =
     `☀️ <b>Rank Peek</b> — щоденний звіт\n` +
-    `Поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})\n` +
+    `Поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})${staleLine}\n` +
     lines.join('\n') +
     `\n🕒 ${fmtNow()}`;
   await sendTelegramChunked(cfg.telegramToken, cfg.telegramChatId, msg);
@@ -585,7 +612,7 @@ async function recordAndAdvance(result) {
   s.consecutiveErrors = result.error ? (s.consecutiveErrors || 0) + 1 : 0;
 
   await maybeAlert(s, result); // immediate per-site Telegram alert on drop / recovery
-  await updateLastCheck(result); // persist last position + timestamp per site
+  await updateLastCheck(result, (s.targets || []).map((t) => t.domain)); // persist per site
   try {
     await fetch(s.ingestUrl, {
       method: 'POST',

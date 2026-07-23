@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Rank Peek — конкуренти</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --card: #171a2b;
+    --line: #262a41;
+    --txt: #e7e9f3;
+    --muted: #9aa0bd;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 14px/1.45 system-ui, -apple-system, sans-serif;
+    color: var(--txt);
+    background: var(--bg);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  input[type='search'] {
+    flex: 1; min-width: 220px; background: #0d1020; color: var(--txt);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font: 13px system-ui, sans-serif;
+  }
+  select, button {
+    background: var(--card); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font: 13px system-ui, sans-serif; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  label.chk { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 12px;
+  }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; margin-bottom: 8px; }
+  .brand { font-size: 15px; font-weight: 700; }
+  .kw { color: var(--muted); }
+  .geo { color: var(--muted); font-size: 12px; }
+  .me { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .me .lbl { color: var(--muted); font-size: 12px; }
+  .pill {
+    display: inline-block; min-width: 34px; text-align: center; padding: 2px 8px;
+    border-radius: 6px; font-weight: 700; font: 12px ui-monospace, Consolas, monospace;
+  }
+  .p-good { background: rgba(52, 211, 153, 0.16); color: var(--green); }
+  .p-mid { background: rgba(251, 191, 36, 0.16); color: var(--amber); }
+  .p-bad { background: rgba(248, 113, 113, 0.16); color: var(--red); }
+  table.comp { width: 100%; border-collapse: collapse; }
+  table.comp td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  table.comp td.rank { width: 42px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; white-space: nowrap; }
+  table.comp td.dom { width: 210px; }
+  table.comp td.dom a { color: #a5b4fc; text-decoration: none; word-break: break-all; }
+  table.comp td.title { color: var(--muted); }
+  .none { color: var(--muted); font-size: 13px; padding: 4px 0; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .badge { display:inline-block; font: 11px ui-monospace, monospace; color: var(--muted); }
+</style>
+
+<h1>👥 Rank Peek — конкуренти</h1>
+<div class="sub" id="sub">—</div>
+
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Пошук: сайт, кейворд, гео, домен конкурента…" />
+  <select id="geo"><option value="">Усі гео</option></select>
+  <label class="chk"><input id="onlybad" type="checkbox" /> Тільки де я поза топ-5 / OUT</label>
+  <button id="csv" class="primary">⭳ CSV</button>
+  <button id="refresh">↻ Оновити</button>
+</div>
+
+<div id="list"></div>
+
+<script src="competitors.js"></script>

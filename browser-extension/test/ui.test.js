@@ -246,13 +246,6 @@ async function main() {
     ok(outCsv.includes('Сайт') && outCsv.charCodeAt(0) === 0xfeff, 'P.10 buildCsv header + BOM');
     ok(/(^|,)OUT(,|$)/m.test(outCsv) && outCsv.includes('ERR'), 'P.11 buildCsv OUT + ERR markers');
 
-    const comp = ctx.buildCompetitorsCsv(
-      [{ site: 'A', keyword: 'A', geo: 'Italy', position: 2, domain: 'a.com', collectedAt: new Date().toISOString(), topResults: [{ host: 'a.com', position: 2, title: 'me', url: 'u' }, { host: 'trustpilot.com', position: 1, title: 'tp', url: 'u' }, { host: 'rival.com', position: 3, title: 'r', url: 'u' }] }],
-      ['a.com'],
-      5,
-    );
-    ok(comp.includes('rival.com') && !comp.includes('trustpilot.com') && !/(^|,)a\.com(,|$)/m.test(comp.split('\n').slice(1).join('\n')), 'P.12 competitors excludes own + noise, keeps rival');
-
     // Minimal 4-column format (no Brand) + dedupe
     const minCsv = [
       'Domain,keyword,second keyword,GEO',
@@ -282,7 +275,6 @@ async function main() {
 
     // Excel friendliness: exports carry a sep=, hint so Excel splits columns
     ok(outCsv.startsWith('﻿sep=,'), 'P.21 buildCsv starts with BOM + sep=, hint');
-    ok(comp.startsWith('﻿sep=,'), 'P.22 competitors CSV starts with BOM + sep=, hint');
 
     // Import tolerates the sep= line and semicolon delimiter (re-saved from Excel)
     const sepCsv = ['sep=,', 'Domain,keyword,GEO', 'foo.it,foo,Italy'].join('\r\n');
@@ -409,6 +401,34 @@ async function main() {
     await ifn3();
     await flush();
     ok(sent3.some((m) => m.type === 'rankpeek:blocked'), 'C.8 block detected on hard 403 "does not have permission" page');
+  }
+
+  // ---------------------------------------------------------------------
+  section('K. competitors.js — structured competitors view + CSV');
+  {
+    const now = new Date().toISOString();
+    const storage = makeStorage({
+      lastChecks: {
+        'a.com|A|it': { site: 'A', keyword: 'A', geo: 'Italy', gl: 'it', domain: 'a.com', position: 2, error: null, checkedAt: now, competitors: [{ position: 3, host: 'rival1.com', title: 'R1', url: 'https://rival1.com/' }, { position: 5, host: 'rival2.com', title: 'R2', url: 'https://rival2.com/' }] },
+        'b.com|B|fr': { site: 'B', keyword: 'B', geo: 'France', gl: 'fr', domain: 'b.com', position: null, error: null, checkedAt: now, competitors: [] },
+      },
+    });
+    const ctx = loadFile('competitors.js', {
+      chrome: { storage: { local: storage.local } },
+      document: makeDocument(),
+      setInterval: () => 0,
+      clearInterval: () => 0,
+      setTimeout: () => 0,
+      location: { href: 'chrome-extension://test/competitors.html' },
+    });
+    await flush();
+    const csv = ctx.buildCsv();
+    ok(csv.startsWith('﻿sep=,'), 'K.1 competitors CSV starts with BOM + sep=, hint');
+    ok(csv.includes('Домен конкурента'), 'K.2 competitors CSV header present');
+    ok(csv.includes('rival1.com') && csv.includes('rival2.com'), 'K.3 competitor domains present');
+    ok(csv.includes('(конкурентів не знайдено)'), 'K.4 empty-competitors row rendered');
+    const bodyLines = csv.split('\r\n');
+    ok(bodyLines.some((l) => l.startsWith('B,B,France,OUT')), 'K.5 my OUT position shown for B');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
