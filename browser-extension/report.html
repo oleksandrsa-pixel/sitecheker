@@ -1,0 +1,206 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Rank Peek — звіт по позиціях</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --card: #171a2b;
+    --line: #262a41;
+    --txt: #e7e9f3;
+    --muted: #9aa0bd;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --accent: #6366f1;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 14px/1.45 system-ui, -apple-system, sans-serif;
+    color: var(--txt);
+    background: var(--bg);
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+  .cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 16px;
+    min-width: 110px;
+  }
+  .stat .n {
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .stat .l {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  input[type='search'] {
+    flex: 1;
+    min-width: 220px;
+    background: #0d1020;
+    color: var(--txt);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font: 13px system-ui, sans-serif;
+  }
+  select,
+  button {
+    background: var(--card);
+    color: var(--txt);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font: 13px system-ui, sans-serif;
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  label.chk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .wrap {
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    min-width: 640px;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    position: sticky;
+    top: 0;
+    background: #1b1f33;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  tr:last-child td {
+    border-bottom: 0;
+  }
+  tr:hover td {
+    background: rgba(99, 102, 241, 0.06);
+  }
+  .site {
+    font-weight: 600;
+  }
+  .domain,
+  .geo,
+  .when {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .when {
+    font: 12px ui-monospace, Consolas, monospace;
+    white-space: nowrap;
+  }
+  .kwcell .kw {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 3px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pill {
+    display: inline-block;
+    min-width: 34px;
+    text-align: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 700;
+    font: 12px ui-monospace, Consolas, monospace;
+  }
+  .p-good {
+    background: rgba(52, 211, 153, 0.16);
+    color: var(--green);
+  }
+  .p-mid {
+    background: rgba(251, 191, 36, 0.16);
+    color: var(--amber);
+  }
+  .p-bad {
+    background: rgba(248, 113, 113, 0.16);
+    color: var(--red);
+  }
+  .p-none {
+    color: #4b5169;
+  }
+  .empty {
+    padding: 40px;
+    text-align: center;
+    color: var(--muted);
+  }
+</style>
+
+<h1>🔎 Rank Peek — звіт по позиціях</h1>
+<div class="sub" id="sub">—</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Пошук: сайт, домен, гео, кейворд…" />
+  <select id="geo"><option value="">Усі гео</option></select>
+  <label class="chk"><input id="onlybad" type="checkbox" /> Тільки проблемні (нижче топ-5 / OUT)</label>
+  <button id="csv" class="primary">⭳ CSV (структурований)</button>
+  <button id="refresh">↻ Оновити</button>
+</div>
+
+<div class="wrap">
+  <table id="tbl">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script src="report.js"></script>

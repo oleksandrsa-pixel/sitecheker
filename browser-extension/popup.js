@@ -27,6 +27,9 @@ function loadConfig() {
       'sweepTargets',
       'ingestUrl',
       'stepDelaySec',
+      'batchSize',
+      'batchPauseSec',
+      'cooldownMin',
       'telegramToken',
       'telegramChatId',
       'alertMaxPos',
@@ -37,7 +40,10 @@ function loadConfig() {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
       $('targets').value = JSON.stringify(targets, null, 2);
       $('ingest').value = v.ingestUrl || 'http://127.0.0.1:33000/ingest/serp';
-      $('delay').value = v.stepDelaySec || 15;
+      $('delay').value = v.stepDelaySec || 20;
+      $('batch').value = v.batchSize != null ? v.batchSize : 20;
+      $('batchpause').value = v.batchPauseSec || 180;
+      $('cooldown').value = v.cooldownMin || 30;
       $('tgtoken').value = v.telegramToken || '';
       $('tgchat').value = v.telegramChatId || '';
       $('maxpos').value = v.alertMaxPos || 5;
@@ -60,13 +66,19 @@ $('save').addEventListener('click', () => {
   // sweepTargets = objects for the auto-sweep; targets = domain strings for the
   // passive overlay highlighting (keep both in sync from one editor).
   const overlayDomains = [...new Set(targets.map((t) => t.domain).filter(Boolean))];
-  const stepDelaySec = Math.max(3, Number($('delay').value) || 15);
+  const stepDelaySec = Math.max(3, Number($('delay').value) || 20);
+  const batchSize = Math.max(0, Number($('batch').value) || 0);
+  const batchPauseSec = Math.max(30, Number($('batchpause').value) || 180);
+  const cooldownMin = Math.max(1, Number($('cooldown').value) || 30);
   chrome.storage.local.set(
     {
       sweepTargets: targets,
       targets: overlayDomains,
       ingestUrl: $('ingest').value.trim(),
       stepDelaySec,
+      batchSize,
+      batchPauseSec,
+      cooldownMin,
     },
     () => {
       $('msg').style.color = '#16a34a';
@@ -78,6 +90,9 @@ $('save').addEventListener('click', () => {
 
 $('run').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'rankpeek:start' }));
 $('stop').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'rankpeek:stop' }));
+$('report').addEventListener('click', () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL('report.html') }),
+);
 
 function stamp() {
   const d = new Date();
@@ -273,7 +288,14 @@ function render() {
 
       // Status badge
       const badge = $('badge');
-      if (s?.running) {
+      if (s?.running && s.paused) {
+        badge.textContent = s.blocked ? '⏸ CAPTCHA — реши у вкладці' : '⏸ пауза';
+        badge.className = 'badge';
+        badge.style.background = 'rgba(248,113,113,.16)';
+        badge.style.color = '#f87171';
+      } else if (s?.running) {
+        badge.style.background = '';
+        badge.style.color = '';
         badge.textContent = `прохід ${s.results?.length ?? 0}/${s.targets?.length ?? targets.length}`;
         badge.className = 'badge run';
       } else if (v.autoSchedule) {
@@ -285,7 +307,12 @@ function render() {
       }
 
       // Status line
-      if (s?.running) {
+      if (s?.running && s.paused) {
+        const cur = s.current?.target;
+        $('status').textContent = s.blocked
+          ? `Google показав перевірку${cur ? ` на «${cur.keyword}»` : ''}. Розв'яжи CAPTCHA у відкритій вкладці — прохід продовжиться сам.`
+          : 'Пауза — зачекай, прохід відновиться автоматично.';
+      } else if (s?.running) {
         const cur = s.current?.target;
         $('status').textContent =
           `Іде прохід… ${s.results?.length ?? 0}/${s.targets?.length ?? 0}` +

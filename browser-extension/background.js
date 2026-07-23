@@ -5,10 +5,26 @@
 // reads each SERP via the content script, and POSTs each result to the tracker
 // ingest endpoint. Alarms are used so the sweep survives service-worker
 // suspension between steps.
+//
+// Anti-block behaviour (v0.3):
+//   - Human pacing with random jitter on every gap between queries.
+//   - A long "batch break" every N queries so a run of ~200 targets is not one
+//     uninterrupted burst (that is what trips Google's rate limits).
+//   - Block detection: if Google shows a CAPTCHA / "sorry" interstitial /
+//     consent wall (detected by tab URL or by the content script), the sweep
+//     PAUSES on that target, brings the challenge tab to the front so the user
+//     can solve it once by hand, and resumes automatically afterwards. If the
+//     user is away, it auto-retries the same target after a cooldown.
+//   - Repeated silent failures (timeouts) are treated as a soft block and also
+//     trigger a cooldown instead of blindly continuing.
 
 const DEFAULT_INGEST = 'http://127.0.0.1:33000/ingest/serp';
-const DEFAULT_STEP_DELAY_SEC = 15; // human pace between queries (configurable in popup)
-const RESULT_TIMEOUT_MS = 20_000; // abandon a query with no result after this
+const DEFAULT_STEP_DELAY_SEC = 20; // human pace between queries (configurable)
+const DEFAULT_BATCH_SIZE = 20; // long break after this many queries
+const DEFAULT_BATCH_PAUSE_SEC = 180; // length of that long break
+const DEFAULT_COOLDOWN_MIN = 30; // wait after a block before auto-retry
+const RESULT_TIMEOUT_MS = 22_000; // abandon a query with no result after this
+const SOFT_FAIL_LIMIT = 2; // consecutive errors that look like a soft block
 
 // One row per (site x keyword x geo). gl = country, hl = local language.
 const DEFAULT_TARGETS = [
@@ -32,6 +48,15 @@ const matchHost = (host, target) => {
 };
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Random jitter so gaps between queries never look mechanical (±35%).
+const jitter = (ms) => Math.round(ms * (0.65 + Math.random() * 0.7));
+
+// URL patterns that mean "Google is challenging us, not serving results".
+const isBlockUrl = (u) =>
+  /\/sorry\//i.test(u || '') ||
+  /consent\.google\./i.test(u || '') ||
+  /\/interstitial/i.test(u || '');
+
 const getSweep = async () => (await chrome.storage.local.get('sweep')).sweep;
 const setSweep = async (s) => chrome.storage.local.set({ sweep: s });
 
@@ -48,12 +73,22 @@ function validTargets(list) {
 async function getConfig() {
   // NOTE: dedicated key `sweepTargets` (objects) — separate from the overlay's
   // legacy `targets` (domain strings) to avoid a shape collision.
-  const v = await chrome.storage.local.get(['sweepTargets', 'ingestUrl', 'stepDelaySec']);
+  const v = await chrome.storage.local.get([
+    'sweepTargets',
+    'ingestUrl',
+    'stepDelaySec',
+    'batchSize',
+    'batchPauseSec',
+    'cooldownMin',
+  ]);
   const delaySec = Math.max(3, Number(v.stepDelaySec) || DEFAULT_STEP_DELAY_SEC);
   return {
     targets: validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS,
     ingestUrl: v.ingestUrl || DEFAULT_INGEST,
     stepDelayMs: delaySec * 1000,
+    batchSize: Math.max(0, Number(v.batchSize) || DEFAULT_BATCH_SIZE),
+    batchPauseMs: Math.max(30, Number(v.batchPauseSec) || DEFAULT_BATCH_PAUSE_SEC) * 1000,
+    cooldownMs: Math.max(1, Number(v.cooldownMin) || DEFAULT_COOLDOWN_MIN) * 60_000,
   };
 }
 
@@ -116,11 +151,12 @@ async function maybeAlert(s, result) {
   if (msg) await sendTelegram(s.telegramToken, s.telegramChatId, msg);
 }
 
-// Persist the last check (position + timestamp) per target so the popup can
-// show "last run" for each site even between sweeps.
+// Persist the last check (position + timestamp) per target so the popup and the
+// report page can show "last run" for each site even between sweeps.
 async function updateLastCheck(result) {
   const key = `${result.domain}|${result.keyword}|${result.gl}`;
   const store = (await chrome.storage.local.get('lastChecks')).lastChecks || {};
+  const top1 = (result.topResults && result.topResults[0] && result.topResults[0].host) || null;
   store[key] = {
     site: result.site,
     keyword: result.keyword,
@@ -128,6 +164,7 @@ async function updateLastCheck(result) {
     domain: result.domain,
     gl: result.gl,
     position: result.position,
+    top1,
     checkedAt: result.collectedAt,
     error: result.error || null,
   };
@@ -157,21 +194,28 @@ chrome.runtime.onInstalled?.addListener(() => {
 });
 
 async function startSweep() {
-  const { targets, ingestUrl, stepDelayMs } = await getConfig();
-  const cfg = await chrome.storage.local.get([
+  const cfg = await getConfig();
+  const c = await chrome.storage.local.get([
     'telegramToken',
     'telegramChatId',
     'alertMaxPos',
   ]);
   await setSweep({
     running: true,
+    paused: false,
+    blocked: false,
     index: 0,
-    targets,
-    ingestUrl,
-    stepDelayMs,
-    alertMaxPos: Number(cfg.alertMaxPos) || 5,
-    telegramToken: cfg.telegramToken || '',
-    telegramChatId: cfg.telegramChatId || '',
+    sinceBreak: 0,
+    consecutiveErrors: 0,
+    targets: cfg.targets,
+    ingestUrl: cfg.ingestUrl,
+    stepDelayMs: cfg.stepDelayMs,
+    batchSize: cfg.batchSize,
+    batchPauseMs: cfg.batchPauseMs,
+    cooldownMs: cfg.cooldownMs,
+    alertMaxPos: Number(c.alertMaxPos) || 5,
+    telegramToken: c.telegramToken || '',
+    telegramChatId: c.telegramChatId || '',
     results: [],
     current: null,
     startedAt: Date.now(),
@@ -183,10 +227,14 @@ async function stopSweep() {
   const s = await getSweep();
   if (s) {
     s.running = false;
+    s.paused = false;
+    s.blocked = false;
     s.current = null;
     await setSweep(s);
   }
-  await chrome.alarms.clearAll();
+  await chrome.alarms.clear('next');
+  await chrome.alarms.clear('timeout');
+  await chrome.alarms.clear('resume');
 }
 
 async function step() {
@@ -241,11 +289,76 @@ async function step() {
   await chrome.alarms.create('timeout', { when: Date.now() + RESULT_TIMEOUT_MS });
 }
 
+// Google is challenging us (CAPTCHA / "sorry" / consent). Pause the sweep on the
+// current target, surface the challenge tab so the user can solve it once by
+// hand, and set a fallback auto-retry in case nobody is at the keyboard.
+async function handleBlocked(reason) {
+  const s = await getSweep();
+  if (!s || !s.running || !s.current || s.blocked) return;
+
+  s.blocked = true;
+  s.paused = true;
+  s.blockedReason = reason || 'captcha';
+  s.blockedAt = Date.now();
+  await chrome.alarms.clear('timeout');
+  await chrome.alarms.clear('next');
+  await setSweep(s);
+
+  // Bring the challenge tab to the front so it can be solved manually.
+  try {
+    await chrome.tabs.update(s.current.tabId, { active: true });
+    const tab = await chrome.tabs.get(s.current.tabId);
+    if (tab && tab.windowId != null) {
+      try {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      } catch {
+        /* windows API optional */
+      }
+    }
+  } catch {
+    /* tab already gone */
+  }
+
+  const cooldownMin = Math.round((s.cooldownMs || DEFAULT_COOLDOWN_MIN * 60_000) / 60_000);
+  try {
+    await chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icon.png',
+      title: 'Rank Peek — Google показав перевірку',
+      message: `Розв'яжи CAPTCHA у відкритій вкладці — прохід продовжиться сам. Авто-повтор через ${cooldownMin} хв.`,
+    });
+  } catch {
+    /* notifications optional */
+  }
+  if (s.telegramToken && s.telegramChatId) {
+    await sendTelegram(
+      s.telegramToken,
+      s.telegramChatId,
+      `⏸ <b>Rank Peek</b> на паузі: Google показав CAPTCHA/перевірку.\n` +
+        `Розв'яжи її у браузері — прохід продовжиться сам.\n` +
+        `Якщо ні — авто-повтор через ${cooldownMin} хв.`,
+    );
+  }
+
+  // Fallback: retry the same target after the cooldown even if unattended.
+  await chrome.alarms.create('resume', {
+    when: Date.now() + (s.cooldownMs || DEFAULT_COOLDOWN_MIN * 60_000),
+  });
+}
+
 async function recordAndAdvance(result) {
   const s = await getSweep();
   if (!s || !s.running || !s.current) return;
 
+  // A real message from the current tab means we are no longer blocked.
+  s.blocked = false;
+  s.paused = false;
+  await chrome.alarms.clear('resume');
+  await chrome.alarms.clear('timeout');
+
   s.results.push(result);
+  s.consecutiveErrors = result.error ? (s.consecutiveErrors || 0) + 1 : 0;
+
   await maybeAlert(s, result); // immediate per-site Telegram alert on drop / recovery
   await updateLastCheck(result); // persist last position + timestamp per site
   try {
@@ -263,13 +376,36 @@ async function recordAndAdvance(result) {
   } catch {
     /* tab already gone */
   }
-  await chrome.alarms.clear('timeout');
   s.index += 1;
+  s.sinceBreak = (s.sinceBreak || 0) + 1;
   s.current = null;
+
+  // Choose the gap before the next query.
+  let delayMs;
+  if ((s.consecutiveErrors || 0) >= SOFT_FAIL_LIMIT) {
+    // Several failures in a row look like a soft/IP block — back off hard.
+    delayMs = s.cooldownMs || DEFAULT_COOLDOWN_MIN * 60_000;
+    s.consecutiveErrors = 0;
+    s.sinceBreak = 0;
+    if (s.telegramToken && s.telegramChatId) {
+      await sendTelegram(
+        s.telegramToken,
+        s.telegramChatId,
+        `⚠ <b>Rank Peek</b>: схоже на блокування (кілька помилок поспіль).\n` +
+          `Пауза ${Math.round(delayMs / 60_000)} хв, потім продовжу автоматично.`,
+      );
+    }
+  } else if (s.batchSize && s.sinceBreak >= s.batchSize) {
+    // Scheduled long break so a big list is not one uninterrupted burst.
+    delayMs = jitter(s.batchPauseMs || DEFAULT_BATCH_PAUSE_SEC * 1000);
+    s.sinceBreak = 0;
+  } else {
+    delayMs = jitter(s.stepDelayMs || DEFAULT_STEP_DELAY_SEC * 1000);
+  }
+
+  s.nextAt = Date.now() + delayMs;
   await setSweep(s);
-  await chrome.alarms.create('next', {
-    when: Date.now() + (s.stepDelayMs || DEFAULT_STEP_DELAY_SEC * 1000),
-  });
+  await chrome.alarms.create('next', { when: s.nextAt });
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -290,6 +426,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           checkedOn: today(),
           collectedAt: new Date().toISOString(),
         });
+      }
+      sendResponse?.({ ok: true });
+    } else if (msg?.type === 'rankpeek:blocked') {
+      // Content script spotted an inline CAPTCHA / "unusual traffic" wall.
+      const s = await getSweep();
+      if (s?.running && s.current && sender.tab?.id === s.current.tabId) {
+        await handleBlocked('captcha');
       }
       sendResponse?.({ ok: true });
     } else if (msg?.type === 'rankpeek:start') {
@@ -314,15 +457,44 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // keep the message channel open for the async response
 });
 
+// Watch the current sweep tab for a redirect to a challenge page. `tabs`
+// permission gives us the URL even for hosts we did not inject into.
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab?.url || '';
+  if (!isBlockUrl(url)) return;
+  const s = await getSweep();
+  if (s?.running && s.current && s.current.tabId === tabId && !s.blocked) {
+    await handleBlocked(/consent/i.test(url) ? 'consent' : 'captcha');
+  }
+});
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'schedule') {
     const s = await getSweep();
-    if (!s || !s.running) await startSweep(); // scheduled 4h run (skip if one is active)
+    if (!s || !s.running) await startSweep(); // scheduled run (skip if one is active)
   } else if (alarm.name === 'next') {
     await step();
+  } else if (alarm.name === 'resume') {
+    // Cooldown after a block elapsed and nobody solved it — retry the same
+    // target on a fresh tab.
+    const s = await getSweep();
+    if (s?.running && s.paused) {
+      if (s.current?.tabId != null) {
+        try {
+          await chrome.tabs.remove(s.current.tabId);
+        } catch {
+          /* tab already gone */
+        }
+      }
+      s.paused = false;
+      s.blocked = false;
+      s.current = null;
+      await setSweep(s);
+      await step();
+    }
   } else if (alarm.name === 'timeout') {
     const s = await getSweep();
-    if (s?.running && s.current) {
+    if (s?.running && !s.paused && s.current) {
       const t = s.current.target;
       await recordAndAdvance({
         site: t.site,

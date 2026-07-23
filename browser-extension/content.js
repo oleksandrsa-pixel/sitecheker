@@ -62,6 +62,24 @@
     return h === t || h.endsWith('.' + t);
   };
 
+  // Google sometimes injects an "unusual traffic" / CAPTCHA wall straight onto
+  // the /search page (no redirect). Detect it so the background can pause the
+  // sweep and let the user solve it once, instead of silently timing out.
+  function looksBlocked() {
+    if (/\/sorry\//i.test(location.pathname)) return true;
+    if (
+      document.querySelector(
+        'form[action*="/sorry"], iframe[src*="recaptcha"], iframe[src*="/sorry/"], #recaptcha, #captcha-form, div.g-recaptcha',
+      )
+    ) {
+      return true;
+    }
+    const txt = (document.body?.innerText || '').slice(0, 600).toLowerCase();
+    return /unusual traffic|not a robot|our systems have detected|незвичайний трафік|незвичний трафік|підозрілий трафік|подозрительный трафик|необычный трафик/.test(
+      txt,
+    );
+  }
+
   function getTargets() {
     return new Promise((resolve) => {
       try {
@@ -90,6 +108,17 @@
   }
 
   async function run() {
+    // Stop early on a challenge page and tell the background to pause + surface
+    // this tab for manual solving.
+    if (looksBlocked()) {
+      try {
+        chrome.runtime.sendMessage({ type: 'rankpeek:blocked' });
+      } catch {
+        /* not in an extension context / worker asleep */
+      }
+      return true; // stop retrying — this isn't a results page
+    }
+
     const results = parseOrganic();
     if (results.length === 0) return false;
 

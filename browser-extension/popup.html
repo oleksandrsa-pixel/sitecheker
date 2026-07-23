@@ -230,6 +230,7 @@
   <button id="stop" class="btn btn-stop">■ Стоп</button>
 </div>
 <div class="actions" style="margin-top: -4px">
+  <button id="report" class="btn btn-run" style="flex: 1.4">📊 Звіт</button>
   <button id="csv" class="btn btn-ghost" style="flex: 1">⭳ CSV</button>
   <button id="comp" class="btn btn-ghost" style="flex: 1">⭳ Конкуренти</button>
   <button id="export" class="btn btn-ghost" style="flex: 1">⭳ JSON</button>
@@ -275,7 +276,13 @@
   <input id="csvfile" type="file" accept=".csv,text/csv" />
   <div id="csvmsg" class="msg"></div>
   <p class="hint">Пауза між запитами, сек (менше = швидше, вищий ризик CAPTCHA):</p>
-  <input id="delay" type="number" min="3" step="1" placeholder="15" />
+  <input id="delay" type="number" min="3" step="1" placeholder="20" />
+  <p class="hint">🛡 Анти-блок: довга пауза кожні N запитів (0 = вимкнути):</p>
+  <input id="batch" type="number" min="0" step="1" placeholder="20" />
+  <p class="hint">Тривалість тієї довгої паузи, сек:</p>
+  <input id="batchpause" type="number" min="30" step="10" placeholder="180" />
+  <p class="hint">Пауза після блокування / CAPTCHA, хв (авто-повтор):</p>
+  <input id="cooldown" type="number" min="1" step="1" placeholder="30" />
   <p class="hint">Ingest URL (опційно, для бекенд-пайплайну):</p>
   <input id="ingest" type="text" placeholder="http://127.0.0.1:33000/ingest/serp" />
   <p class="hint">Цілі (JSON, автозаповнюється з CSV):</p>
