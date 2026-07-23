@@ -25,6 +25,9 @@ const DEFAULT_BATCH_PAUSE_SEC = 180; // length of that long break
 const DEFAULT_COOLDOWN_MIN = 30; // wait after a block before auto-retry
 const RESULT_TIMEOUT_MS = 22_000; // abandon a query with no result after this
 const SOFT_FAIL_LIMIT = 2; // consecutive errors that look like a soft block
+const DEFAULT_DRIP_WINDOW_H = 20; // 24/7 mode: spread the whole list over this many hours
+const DRIP_MIN_GAP_MS = 60_000; // never faster than 1/min even for tiny lists
+const DEFAULT_DAILY_REPORT_HOUR = 9; // daily Telegram report time (local)
 
 // One row per (site x keyword x geo). gl = country, hl = local language.
 const DEFAULT_TARGETS = [
@@ -80,6 +83,8 @@ async function getConfig() {
     'batchSize',
     'batchPauseSec',
     'cooldownMin',
+    'dripMode',
+    'dripWindowHours',
   ]);
   const delaySec = Math.max(3, Number(v.stepDelaySec) || DEFAULT_STEP_DELAY_SEC);
   return {
@@ -89,6 +94,8 @@ async function getConfig() {
     batchSize: Math.max(0, Number(v.batchSize) || DEFAULT_BATCH_SIZE),
     batchPauseMs: Math.max(30, Number(v.batchPauseSec) || DEFAULT_BATCH_PAUSE_SEC) * 1000,
     cooldownMs: Math.max(1, Number(v.cooldownMin) || DEFAULT_COOLDOWN_MIN) * 60_000,
+    dripMode: Boolean(v.dripMode),
+    dripWindowMs: Math.max(1, Number(v.dripWindowHours) || DEFAULT_DRIP_WINDOW_H) * 3600_000,
   };
 }
 
@@ -303,10 +310,32 @@ async function sendSweepDigest(s) {
 
 // ---- Scheduling ------------------------------------------------------------
 
+// Minutes from now until the next local HH:00.
+function minutesUntilHour(hour) {
+  const now = new Date();
+  const t = new Date(now);
+  t.setHours(hour, 0, 0, 0);
+  if (t <= now) t.setDate(t.getDate() + 1);
+  return Math.max(1, Math.round((t - now) / 60_000));
+}
+
 async function applySchedule() {
-  const v = await chrome.storage.local.get(['autoSchedule', 'scheduleHours']);
+  const v = await chrome.storage.local.get([
+    'autoSchedule',
+    'scheduleHours',
+    'dripMode',
+    'dailyReport',
+    'dailyReportHour',
+  ]);
   await chrome.alarms.clear('schedule');
-  if (v.autoSchedule) {
+  await chrome.alarms.clear('dailyReport');
+
+  if (v.dripMode) {
+    // 24/7 continuous drip — make sure a sweep is running (it self-restarts on
+    // completion). The legacy every-N-hours alarm is not used in this mode.
+    const s = await getSweep();
+    if (!s || !s.running) await startSweep();
+  } else if (v.autoSchedule) {
     const hours = Math.max(0.5, Number(v.scheduleHours) || 4);
     // First run after `hours`; then every `hours`. Manual "Run" is always available.
     await chrome.alarms.create('schedule', {
@@ -314,6 +343,62 @@ async function applySchedule() {
       delayInMinutes: hours * 60,
     });
   }
+
+  if (v.dailyReport) {
+    const hour = Math.min(23, Math.max(0, Number(v.dailyReportHour ?? DEFAULT_DAILY_REPORT_HOUR)));
+    await chrome.alarms.create('dailyReport', {
+      delayInMinutes: minutesUntilHour(hour),
+      periodInMinutes: 1440,
+    });
+  }
+}
+
+// A once-a-day Telegram summary built from the persisted latest state of EVERY
+// target (independent of when individual checks ran). Trend is day-over-day
+// (position vs ~24h ago).
+async function sendDailyDigest() {
+  const cfg = await chrome.storage.local.get([
+    'telegramToken',
+    'telegramChatId',
+    'alertMaxPos',
+    'lastChecks',
+  ]);
+  if (!cfg.telegramToken || !cfg.telegramChatId) return;
+  const maxPos = Number(cfg.alertMaxPos) || 5;
+  const checks = Object.values(cfg.lastChecks || {});
+  if (!checks.length) return;
+
+  const ok = checks.filter((c) => !c.error);
+  const bad = ok.filter((c) => c.position == null || c.position > maxPos);
+  const inTop = ok.length - bad.length;
+
+  if (bad.length === 0) {
+    await sendTelegram(
+      cfg.telegramToken,
+      cfg.telegramChatId,
+      `☀️ <b>Rank Peek</b> — щоденний звіт\nУсі ${inTop} цілей у топ-${maxPos}. Проблемних нема.\n🕒 ${fmtNow()}`,
+    );
+    return;
+  }
+
+  bad.sort((a, b) => {
+    const pa = a.position == null ? 1e9 : a.position;
+    const pb = b.position == null ? 1e9 : b.position;
+    return pb - pa;
+  });
+
+  const lines = bad.map((c) => {
+    const base = c.yesterdayPosition !== undefined ? c.yesterdayPosition : c.prevPosition;
+    const curTxt = c.position == null ? 'OUT' : `#${c.position}`;
+    return `• <b>${c.site}</b> · ${c.geo} · «${c.keyword}» — ${curTxt} ${trendText(base, c.position)}`;
+  });
+
+  const msg =
+    `☀️ <b>Rank Peek</b> — щоденний звіт\n` +
+    `Поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})\n` +
+    lines.join('\n') +
+    `\n🕒 ${fmtNow()}`;
+  await sendTelegramChunked(cfg.telegramToken, cfg.telegramChatId, msg);
 }
 
 chrome.runtime.onStartup?.addListener(() => {
@@ -343,6 +428,8 @@ async function startSweep() {
     batchSize: cfg.batchSize,
     batchPauseMs: cfg.batchPauseMs,
     cooldownMs: cfg.cooldownMs,
+    dripMode: cfg.dripMode,
+    dripWindowMs: cfg.dripWindowMs,
     alertMaxPos: Number(c.alertMaxPos) || 5,
     telegramToken: c.telegramToken || '',
     telegramChatId: c.telegramChatId || '',
@@ -385,6 +472,13 @@ async function step() {
       });
     } catch {
       /* notifications optional */
+    }
+    // In 24/7 drip mode keep cycling forever; the daily-report alarm handles
+    // the summary, so we skip the per-cycle digest here.
+    const drip = (await chrome.storage.local.get('dripMode')).dripMode;
+    if (drip) {
+      await startSweep();
+      return;
     }
     await sendSweepDigest(s); // recurring per-sweep reminder of all out-of-top sites
     return;
@@ -526,6 +620,11 @@ async function recordAndAdvance(result) {
           `Пауза ${Math.round(delayMs / 60_000)} хв, потім продовжу автоматично.`,
       );
     }
+  } else if (s.dripMode) {
+    // 24/7 drip: spread the whole list evenly across the window, heavily
+    // randomized, so the pace looks human and never bursts.
+    const per = (s.dripWindowMs || DEFAULT_DRIP_WINDOW_H * 3600_000) / Math.max(1, s.targets.length);
+    delayMs = Math.max(DRIP_MIN_GAP_MS, jitter(per));
   } else if (s.batchSize && s.sinceBreak >= s.batchSize) {
     // Scheduled long break so a big list is not one uninterrupted burst.
     delayMs = jitter(s.batchPauseMs || DEFAULT_BATCH_PAUSE_SEC * 1000);
@@ -603,6 +702,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'schedule') {
     const s = await getSweep();
     if (!s || !s.running) await startSweep(); // scheduled run (skip if one is active)
+  } else if (alarm.name === 'dailyReport') {
+    await sendDailyDigest();
   } else if (alarm.name === 'next') {
     await step();
   } else if (alarm.name === 'resume') {

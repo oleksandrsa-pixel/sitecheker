@@ -267,6 +267,18 @@
     <input id="auto" type="checkbox" /> Авто-прохід кожні
     <input id="hours" type="number" min="1" step="1" value="4" style="width: 52px" /> год
   </label>
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="drip" type="checkbox" /> <b>Режим 24/7</b>: розтягнути весь список на
+    <input id="dripwin" type="number" min="1" max="24" step="1" value="20" style="width: 52px" /> год
+  </label>
+  <p class="hint" style="margin-left: 22px; margin-top: -2px">
+    Найм'якший темп проти блокувань: ~1 запит раз на кілька хвилин, по колу цілодобово
+    (комп має бути ввімкнений). Замінює «авто-прохід кожні N год».
+  </p>
+  <label style="display: block; margin-top: 4px; color: var(--muted)">
+    <input id="daily" type="checkbox" /> <b>Щоденний звіт</b> у Telegram о
+    <input id="dailyhour" type="number" min="0" max="23" step="1" value="9" style="width: 52px" /> :00
+  </label>
   <div class="row-btns">
     <button id="savetg">Зберегти + увімкнути</button>
     <button id="testtg" class="sec">Тест Telegram</button>

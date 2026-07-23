@@ -466,6 +466,74 @@ async function main() {
     ok(r && /invalid target/.test(r.error), '9.1 malformed target recorded as invalid, sweep survived');
   }
 
+  // ---------------------------------------------------------------------
+  section('10. 24/7 drip mode: spread pacing + continuous restart');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.dripMode = true;
+    env.store.dripWindowHours = 20;
+
+    await fire.message({ type: 'rankpeek:start' });
+    ok(env.store.sweep.dripMode === true, '10.1 sweep carries dripMode');
+    let tabId = env.store.sweep.current.tabId;
+    const t0 = Date.now();
+    await fire.message({ type: 'rankpeek:serp', payload: { q: 'A', gl: 'it', results: serpWithTarget('a.com', 2) } }, { tab: { id: tabId } });
+    const delay = env.store.sweep.nextAt - t0;
+    const per = (20 * 3600000) / 2; // window / count
+    ok(delay >= 60000, '10.2 drip gap respects the 1/min floor', String(delay));
+    ok(delay >= per * 0.6 && delay <= per * 1.4, '10.3 drip gap ≈ window/count (jittered)', String(Math.round(delay / 60000)) + 'min');
+
+    await fire.alarm('next'); // -> target B
+    tabId = env.store.sweep.current.tabId;
+    await fire.message({ type: 'rankpeek:serp', payload: { q: 'B', gl: 'fr', results: serpWithTarget('b.com', 4) } }, { tab: { id: tabId } });
+    const tabsBefore = env.calls.tabsCreated.length;
+    await fire.alarm('next'); // list done -> drip should auto-restart a fresh cycle
+    ok(env.store.sweep.running === true, '10.4 drip auto-restarts (still running after list end)');
+    ok(env.store.sweep.index === 0, '10.5 restarted at index 0');
+    ok(env.store.sweep.results.length <= 1, '10.6 results reset on new cycle');
+    ok(env.calls.tabsCreated.length > tabsBefore, '10.7 new cycle opened a fresh tab');
+  }
+
+  // ---------------------------------------------------------------------
+  section('11. Daily report digest from lastChecks');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    env.store.alertMaxPos = 5;
+    env.store.lastChecks = {
+      'a.com|A|it': { site: 'A', geo: 'Italy', keyword: 'A', domain: 'a.com', gl: 'it', position: 2, yesterdayPosition: 3, error: null },
+      'b.com|B|fr': { site: 'B', geo: 'France', keyword: 'B', domain: 'b.com', gl: 'fr', position: 8, yesterdayPosition: 4, error: null },
+      'c.com|C|es': { site: 'C', geo: 'Spain', keyword: 'C', domain: 'c.com', gl: 'es', position: null, yesterdayPosition: 2, error: null },
+    };
+    await fire.alarm('dailyReport');
+    const m = env.calls.tg.find((x) => x.includes('щоденний звіт'));
+    ok(!!m, '11.1 daily report sent');
+    ok(m && m.includes('Поза топ-5: <b>2</b>'), '11.2 counts 2 out of top (B #8, C OUT)');
+    ok(m && m.includes('«B»') && m.includes('🔴▼4'), '11.3 B trend vs yesterday 4->8 = ▼4');
+    ok(m && m.includes('«C»') && m.includes('OUT'), '11.4 C shown as OUT');
+    ok(!m || !m.includes('«A»'), '11.5 in-top A not listed');
+
+    // all-clear variant
+    const env2 = makeEnv();
+    loadBackground(env2);
+    const fire2 = makeDriver(env2);
+    env2.store.telegramToken = 'TOK';
+    env2.store.telegramChatId = 'CHAT';
+    env2.store.alertMaxPos = 5;
+    env2.store.lastChecks = { 'a.com|A|it': { site: 'A', geo: 'Italy', keyword: 'A', domain: 'a.com', gl: 'it', position: 2, yesterdayPosition: 2, error: null } };
+    await fire2.alarm('dailyReport');
+    ok(env2.calls.tg.some((x) => x.includes('Проблемних нема')), '11.6 all-clear daily report');
+  }
+
   // done
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;

@@ -36,6 +36,10 @@ function loadConfig() {
       'digestEveryRun',
       'autoSchedule',
       'scheduleHours',
+      'dripMode',
+      'dripWindowHours',
+      'dailyReport',
+      'dailyReportHour',
     ],
     (v) => {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
@@ -51,6 +55,10 @@ function loadConfig() {
       $('digest').checked = v.digestEveryRun !== false; // default ON
       $('auto').checked = Boolean(v.autoSchedule);
       $('hours').value = v.scheduleHours || 4;
+      $('drip').checked = Boolean(v.dripMode);
+      $('dripwin').value = v.dripWindowHours || 20;
+      $('daily').checked = Boolean(v.dailyReport);
+      $('dailyhour').value = v.dailyReportHour != null ? v.dailyReportHour : 9;
     },
   );
 }
@@ -357,14 +365,21 @@ $('savetg').addEventListener('click', () => {
     digestEveryRun: $('digest').checked,
     autoSchedule: $('auto').checked,
     scheduleHours: Math.max(1, Number($('hours').value) || 4),
+    dripMode: $('drip').checked,
+    dripWindowHours: Math.min(24, Math.max(1, Number($('dripwin').value) || 20)),
+    dailyReport: $('daily').checked,
+    dailyReportHour: Math.min(23, Math.max(0, Number($('dailyhour').value) || 9)),
   };
   chrome.storage.local.set(cfg, () => {
-    chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm or clear the 4h alarm
+    chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm alarms / start drip
     $('tgmsg').style.color = '#16a34a';
-    $('tgmsg').textContent = cfg.autoSchedule
-      ? `Збережено ✓ · авто-прохід кожні ${cfg.scheduleHours} год`
-      : 'Збережено ✓ · авто-прохід вимкнено';
-    setTimeout(() => ($('tgmsg').textContent = ''), 2500);
+    const parts = [];
+    if (cfg.dripMode) parts.push(`24/7 drip (${cfg.dripWindowHours} год)`);
+    else if (cfg.autoSchedule) parts.push(`авто-прохід кожні ${cfg.scheduleHours} год`);
+    else parts.push('авто-прохід вимкнено');
+    if (cfg.dailyReport) parts.push(`звіт о ${cfg.dailyReportHour}:00`);
+    $('tgmsg').textContent = `Збережено ✓ · ${parts.join(' · ')}`;
+    setTimeout(() => ($('tgmsg').textContent = ''), 3000);
   });
 });
 
