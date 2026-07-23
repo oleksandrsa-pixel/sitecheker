@@ -1,0 +1,498 @@
+'use strict';
+// Rank Peek beta test — loads the real extension files in a mocked
+// chrome/DOM/fetch environment and drives real scenarios.
+
+const vm = require('vm');
+const fs = require('fs');
+const path = require('path');
+
+const EXT = require('path').join(__dirname, '..');
+
+let passed = 0;
+let failed = 0;
+const fails = [];
+function ok(cond, name, detail) {
+  if (cond) {
+    passed += 1;
+  } else {
+    failed += 1;
+    fails.push(name + (detail ? ` — ${detail}` : ''));
+    console.log('  ✗ ' + name + (detail ? ` — ${detail}` : ''));
+  }
+}
+function section(t) {
+  console.log('\n=== ' + t + ' ===');
+}
+
+const flush = async () => {
+  for (let i = 0; i < 40; i += 1) await new Promise((r) => setImmediate(r));
+};
+
+const BUILTINS = {
+  console,
+  URL,
+  URLSearchParams,
+  Date,
+  Math,
+  JSON,
+  Promise,
+  Set,
+  Map,
+  WeakSet,
+  WeakMap,
+  RegExp,
+  Number,
+  String,
+  Boolean,
+  Array,
+  Object,
+  Symbol,
+  isNaN,
+  parseInt,
+  parseFloat,
+  encodeURIComponent,
+  decodeURIComponent,
+  TextEncoder,
+  TextDecoder,
+};
+
+// ---- chrome + fetch mock ---------------------------------------------------
+
+function makeEnv() {
+  const store = {};
+  const alarms = {};
+  const listeners = { message: [], alarm: [], tabUpdated: [], startup: [], installed: [] };
+  const tabs = {};
+  let tabSeq = 100;
+  const calls = {
+    tabsCreated: [],
+    tabsRemoved: [],
+    tabsUpdated: [],
+    windowsUpdated: [],
+    notifications: [],
+    ingest: [],
+    tg: [], // telegram message texts
+  };
+
+  const local = {
+    get(keys, cb) {
+      let result = {};
+      if (keys == null) result = { ...store };
+      else if (typeof keys === 'string') result[keys] = store[keys];
+      else if (Array.isArray(keys)) keys.forEach((k) => (result[k] = store[k]));
+      else if (typeof keys === 'object')
+        Object.keys(keys).forEach((k) => (result[k] = k in store ? store[k] : keys[k]));
+      if (typeof cb === 'function') return void cb(result);
+      return Promise.resolve(result);
+    },
+    set(obj, cb) {
+      Object.assign(store, obj);
+      if (typeof cb === 'function') return void cb();
+      return Promise.resolve();
+    },
+    remove(keys, cb) {
+      (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete store[k]);
+      if (typeof cb === 'function') return void cb();
+      return Promise.resolve();
+    },
+  };
+
+  const chrome = {
+    storage: { local },
+    runtime: {
+      onMessage: { addListener: (fn) => listeners.message.push(fn) },
+      onStartup: { addListener: (fn) => listeners.startup.push(fn) },
+      onInstalled: { addListener: (fn) => listeners.installed.push(fn) },
+      sendMessage: (msg, cb) => {
+        // content -> background bridge is simulated explicitly in tests; here we
+        // just record and optionally ack.
+        if (typeof cb === 'function') cb({ ok: true });
+      },
+      getURL: (p) => 'chrome-extension://test/' + p,
+    },
+    tabs: {
+      create: async ({ url, active }) => {
+        const id = (tabSeq += 1);
+        tabs[id] = { id, url, windowId: 1, active };
+        calls.tabsCreated.push({ id, url, active });
+        return { id, windowId: 1 };
+      },
+      remove: async (id) => {
+        calls.tabsRemoved.push(id);
+        delete tabs[id];
+      },
+      update: async (id, info) => {
+        calls.tabsUpdated.push({ id, info });
+        if (tabs[id]) Object.assign(tabs[id], info);
+        return tabs[id] || { id };
+      },
+      get: async (id) => {
+        if (!tabs[id]) throw new Error('no such tab');
+        return tabs[id];
+      },
+      onUpdated: { addListener: (fn) => listeners.tabUpdated.push(fn) },
+    },
+    alarms: {
+      create: async (name, info) => {
+        alarms[name] = info || {};
+      },
+      clear: async (name) => {
+        delete alarms[name];
+        return true;
+      },
+      clearAll: async () => {
+        Object.keys(alarms).forEach((k) => delete alarms[k]);
+        return true;
+      },
+      onAlarm: { addListener: (fn) => listeners.alarm.push(fn) },
+    },
+    notifications: {
+      create: async (opts) => {
+        calls.notifications.push(opts);
+      },
+    },
+    windows: {
+      update: async (id, info) => {
+        calls.windowsUpdated.push({ id, info });
+      },
+    },
+  };
+
+  async function fetchMock(url, opts) {
+    if (/api\.telegram\.org/.test(url)) {
+      let text = '';
+      try {
+        text = JSON.parse(opts.body).text;
+      } catch {}
+      calls.tg.push(text);
+    } else {
+      calls.ingest.push({ url, body: opts && opts.body });
+    }
+    return { ok: true, json: async () => ({}) };
+  }
+
+  return { chrome, fetchMock, store, alarms, listeners, tabs, calls };
+}
+
+function loadBackground(env) {
+  const sandbox = Object.assign({}, BUILTINS, {
+    chrome: env.chrome,
+    fetch: env.fetchMock,
+    setTimeout,
+    clearTimeout,
+    setInterval: () => 0,
+    clearInterval: () => {},
+  });
+  sandbox.globalThis = sandbox;
+  const context = vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(EXT, 'background.js'), 'utf8'), context, {
+    filename: 'background.js',
+  });
+  return context;
+}
+
+// ---- background driver -----------------------------------------------------
+
+function makeDriver(env) {
+  const fire = {
+    async message(msg, sender) {
+      env.listeners.message.forEach((fn) => fn(msg, sender || {}, () => {}));
+      await flush();
+    },
+    async alarm(name) {
+      env.listeners.alarm.forEach((fn) => fn({ name }));
+      await flush();
+    },
+    async tabUpdated(tabId, changeInfo, tab) {
+      env.listeners.tabUpdated.forEach((fn) => fn(tabId, changeInfo, tab));
+      await flush();
+    },
+  };
+  return fire;
+}
+
+// Run a full sweep. serpFor(target, index) -> array of SERP results | 'timeout'.
+async function runSweep(env, fire, serpFor) {
+  await fire.message({ type: 'rankpeek:start' });
+  let guard = 0;
+  while (env.store.sweep && env.store.sweep.running && guard < 2000) {
+    guard += 1;
+    const s = env.store.sweep;
+    if (s.paused) break;
+    if (!s.current) {
+      if (env.alarms.next) {
+        await fire.alarm('next');
+        continue;
+      }
+      break;
+    }
+    const t = s.current.target;
+    const tabId = s.current.tabId;
+    const outcome = serpFor(t, s.index);
+    if (outcome === 'timeout') {
+      await fire.alarm('timeout');
+    } else {
+      await fire.message(
+        { type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: outcome } },
+        { tab: { id: tabId } },
+      );
+      if (env.alarms.next) await fire.alarm('next');
+    }
+  }
+  return guard;
+}
+
+const serp = (arr) => arr.map((x, i) => ({ host: x.host, position: i + 1, url: `https://${x.host}/`, title: x.host }));
+// Build a SERP where a given target domain sits at position `pos` (1-based), OUT if null.
+function serpWithTarget(domain, pos) {
+  const fillers = ['a-competitor.com', 'b-competitor.com', 'c-competitor.com', 'd-competitor.com', 'e-competitor.com', 'f-competitor.com', 'g-competitor.com', 'h-competitor.com', 'i-competitor.com', 'j-competitor.com'];
+  const hosts = [];
+  for (let i = 1; i <= 10; i += 1) {
+    if (pos && i === pos) hosts.push(domain);
+    else hosts.push(fillers[i - 1]);
+  }
+  return serp(hosts.map((h) => ({ host: h })));
+}
+
+// ===========================================================================
+
+async function main() {
+  // ---------------------------------------------------------------------
+  section('1. Full sweep — happy path (10 default targets)');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'A', domain: 'a.com', keyword: 'A casino', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    const positions = { A: 2, 'A casino': 7, B: null };
+    await runSweep(env, fire, (t) => serpWithTarget(t.domain, positions[t.keyword]));
+
+    const s = env.store.sweep;
+    ok(s && s.running === false, '1.1 sweep finished (running=false)');
+    ok(s && s.results.length === 3, '1.2 recorded 3 results', s && String(s.results.length));
+    ok(env.calls.ingest.length === 3, '1.3 posted 3 results to ingest', String(env.calls.ingest.length));
+    const lc = env.store.lastChecks || {};
+    ok(lc['a.com|A|it'] && lc['a.com|A|it'].position === 2, '1.4 lastChecks position for A/A/it = 2');
+    ok(lc['b.com|B|fr'] && lc['b.com|B|fr'].position === null, '1.5 B OUT recorded as null');
+    ok((env.store.history['a.com|A|it'] || []).length === 1, '1.6 history seeded for A');
+    ok(env.calls.tabsRemoved.length === 3, '1.7 all sweep tabs closed', String(env.calls.tabsRemoved.length));
+    ok(!env.alarms.timeout, '1.8 no dangling timeout alarm');
+  }
+
+  // ---------------------------------------------------------------------
+  section('2. Telegram: recurring digest every sweep + one-time drop alert');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    env.store.alertMaxPos = 5;
+    // A in top (#2), B out of top (#8) — both runs identical.
+    const serpFor = (t) => serpWithTarget(t.domain, t.keyword === 'A' ? 2 : 8);
+
+    await runSweep(env, fire, serpFor);
+    const run1 = env.calls.tg.slice();
+    const drop1 = run1.filter((m) => m.includes('Випав із топ')).length;
+    const digest1 = run1.filter((m) => m.includes('поза топ-5')).length;
+    ok(drop1 === 1, '2.1 run1: exactly one transition drop-alert for B', String(drop1));
+    ok(digest1 === 1, '2.2 run1: digest sent', String(digest1));
+    ok(run1.some((m) => m.includes('поза топ-5: <b>1</b>')), '2.3 run1 digest counts 1 out-of-top');
+
+    env.calls.tg.length = 0;
+    await runSweep(env, fire, serpFor);
+    const run2 = env.calls.tg.slice();
+    const drop2 = run2.filter((m) => m.includes('Випав із топ')).length;
+    const digest2 = run2.filter((m) => m.includes('поза топ-5')).length;
+    ok(drop2 === 0, '2.4 run2: NO new transition alert (state unchanged)', String(drop2));
+    ok(digest2 === 1, '2.5 run2: digest STILL sent (recurring reminder)', String(digest2));
+    ok(run2.some((m) => m.includes('«B»') && m.includes('#8')), '2.6 run2 digest lists B at #8');
+    ok(run2.some((m) => m.includes('#8 =')), '2.7 run2 trend vs previous sweep is "=" (8->8)');
+  }
+
+  // ---------------------------------------------------------------------
+  section('3. Telegram digest: all-clear + only-errors');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    await runSweep(env, fire, (t) => serpWithTarget(t.domain, 3));
+    ok(env.calls.tg.some((m) => m.includes('Проблемних нема')), '3.1 all-clear digest when everything in top');
+
+    const env2 = makeEnv();
+    loadBackground(env2);
+    const fire2 = makeDriver(env2);
+    env2.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    env2.store.telegramToken = 'TOK';
+    env2.store.telegramChatId = 'CHAT';
+    await runSweep(env2, fire2, () => 'timeout');
+    ok(env2.calls.tg.some((m) => m.includes('результатів нема')), '3.2 only-errors digest');
+  }
+
+  // ---------------------------------------------------------------------
+  section('4. History / yesterday / trend fields');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    const key = 'a.com|A|it';
+    const ago = (h) => new Date(Date.now() - h * 3600 * 1000).toISOString();
+    env.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    env.store.history = { [key]: [{ pos: 2, at: ago(25) }, { pos: 3, at: ago(5) }] };
+    await runSweep(env, fire, (t) => serpWithTarget(t.domain, 6));
+    const lc = env.store.lastChecks[key];
+    ok(lc.position === 6, '4.1 current position 6');
+    ok(lc.prevPosition === 3, '4.2 prevPosition = last history entry (3)', String(lc.prevPosition));
+    ok(lc.yesterdayPosition === 2, '4.3 yesterdayPosition = entry >=24h old (2)', String(lc.yesterdayPosition));
+    ok((env.store.history[key] || []).length === 3, '4.4 history appended (now 3)');
+  }
+
+  // ---------------------------------------------------------------------
+  section('5. Block via content message -> pause -> manual solve -> resume');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    await fire.message({ type: 'rankpeek:start' }); // opens target A
+    const tabId = env.store.sweep.current.tabId;
+    await fire.message({ type: 'rankpeek:blocked' }, { tab: { id: tabId } });
+
+    let s = env.store.sweep;
+    ok(s.paused === true && s.blocked === true, '5.1 sweep paused+blocked on CAPTCHA');
+    ok(!!env.alarms.resume, '5.2 resume (cooldown) alarm armed');
+    ok(!env.alarms.timeout && !env.alarms.next, '5.3 timeout/next alarms cleared while blocked');
+    ok(env.calls.tabsUpdated.some((u) => u.info.active === true && u.id === tabId), '5.4 challenge tab brought to front');
+    ok(env.calls.notifications.length >= 1, '5.5 system notification shown');
+    ok(env.calls.tg.some((m) => m.includes('на паузі')), '5.6 telegram pause notice sent');
+    ok(s.index === 0, '5.7 index NOT advanced (target retained)');
+
+    // user solves -> content script re-reports SERP on same tab
+    await fire.message(
+      { type: 'rankpeek:serp', payload: { q: 'A', gl: 'it', results: serpWithTarget('a.com', 2) } },
+      { tab: { id: tabId } },
+    );
+    s = env.store.sweep;
+    ok(s.paused === false && s.blocked === false, '5.8 unblocked after solving');
+    ok(!env.alarms.resume, '5.9 resume alarm cleared after solve');
+    ok(env.store.lastChecks['a.com|A|it'] && env.store.lastChecks['a.com|A|it'].position === 2, '5.10 blocked target got recorded (#2)');
+    // finish the sweep
+    if (env.alarms.next) await fire.alarm('next');
+    await runSweep2Continue(env, fire);
+    ok(env.store.sweep.running === false, '5.11 sweep completes after resume');
+  }
+
+  // ---------------------------------------------------------------------
+  section('6. Block via tab redirect to /sorry/ (onUpdated)');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    await fire.message({ type: 'rankpeek:start' });
+    const tabId = env.store.sweep.current.tabId;
+    await fire.tabUpdated(tabId, { url: 'https://www.google.com/sorry/index?continue=...' }, { id: tabId, url: 'https://www.google.com/sorry/index' });
+    ok(env.store.sweep.paused === true, '6.1 paused on /sorry/ redirect');
+    ok(env.store.sweep.blockedReason === 'captcha', '6.2 reason=captcha');
+  }
+
+  // ---------------------------------------------------------------------
+  section('7. Soft block: two consecutive timeouts -> cooldown telegram');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    await runSweep(env, fire, () => 'timeout');
+    ok(env.calls.tg.some((m) => m.includes('схоже на блокування')), '7.1 soft-block cooldown telegram after 2 errors');
+    ok(env.store.sweep.running === false, '7.2 sweep still completes');
+  }
+
+  // ---------------------------------------------------------------------
+  section('8. Stop cancels alarms');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [{ site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' }];
+    await fire.message({ type: 'rankpeek:start' });
+    await fire.message({ type: 'rankpeek:stop' });
+    ok(env.store.sweep.running === false, '8.1 stopped');
+    ok(!env.alarms.next && !env.alarms.timeout && !env.alarms.resume, '8.2 all alarms cleared');
+  }
+
+  // ---------------------------------------------------------------------
+  section('9. Malformed target is skipped, not crashing');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    // bypass validTargets by putting a valid + invalid via direct sweep state is hard;
+    // instead craft sweepTargets where one row misses hl (validTargets rejects whole list
+    // -> falls back to defaults). So test the in-step guard via a hand-built sweep.
+    env.store.sweep = {
+      running: true, paused: false, blocked: false, index: 0, sinceBreak: 0, consecutiveErrors: 0,
+      targets: [{ site: 'X', domain: 'x.com', keyword: '', gl: '', hl: '' }],
+      ingestUrl: 'http://127.0.0.1:33000/ingest/serp', stepDelayMs: 20000, batchSize: 20,
+      batchPauseMs: 180000, cooldownMs: 1800000, alertMaxPos: 5, telegramToken: '', telegramChatId: '',
+      results: [], current: null, startedAt: Date.now(),
+    };
+    await fire.alarm('next'); // triggers step() on the malformed target
+    // advance through the scheduled 'next'
+    let g = 0;
+    while (env.store.sweep.running && env.alarms.next && g < 10) { await fire.alarm('next'); g += 1; }
+    const r = env.store.sweep.results[0];
+    ok(r && /invalid target/.test(r.error), '9.1 malformed target recorded as invalid, sweep survived');
+  }
+
+  // done
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed) process.exitCode = 1;
+}
+
+// helper to keep advancing after a manual resume in test 5
+async function runSweep2Continue(env, fire) {
+  let guard = 0;
+  while (env.store.sweep && env.store.sweep.running && guard < 100) {
+    guard += 1;
+    const s = env.store.sweep;
+    if (s.paused) break;
+    if (!s.current) {
+      if (env.alarms.next) { await fire.alarm('next'); continue; }
+      break;
+    }
+    const t = s.current.target;
+    const tabId = s.current.tabId;
+    await fire.message(
+      { type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: serpWithTarget(t.domain, 3) } },
+      { tab: { id: tabId } },
+    );
+    if (env.alarms.next) await fire.alarm('next');
+  }
+}
+
+main().catch((e) => {
+  console.error('HARNESS ERROR', e);
+  process.exitCode = 2;
+});

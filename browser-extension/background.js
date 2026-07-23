@@ -379,7 +379,7 @@ async function step() {
     try {
       await chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icon.png',
+        iconUrl: chrome.runtime.getURL('icon.png'),
         title: 'Rank Peek — прохід завершено',
         message: `${s.results.length} перевірок, ${hits} у топ-10`,
       });
@@ -454,7 +454,7 @@ async function handleBlocked(reason) {
   try {
     await chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icon.png',
+      iconUrl: chrome.runtime.getURL('icon.png'),
       title: 'Rank Peek — Google показав перевірку',
       message: `Розв'яжи CAPTCHA у відкритій вкладці — прохід продовжиться сам. Авто-повтор через ${cooldownMin} хв.`,
     });

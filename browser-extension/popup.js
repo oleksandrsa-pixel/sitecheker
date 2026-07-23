@@ -288,16 +288,17 @@ function render() {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
       const checks = v.lastChecks || {};
 
-      // Status badge
+      // Status badge — reset any inline colour first so a prior paused (red)
+      // state never leaks into the next render.
       const badge = $('badge');
+      badge.style.background = '';
+      badge.style.color = '';
       if (s?.running && s.paused) {
         badge.textContent = s.blocked ? '⏸ CAPTCHA — реши у вкладці' : '⏸ пауза';
         badge.className = 'badge';
         badge.style.background = 'rgba(248,113,113,.16)';
         badge.style.color = '#f87171';
       } else if (s?.running) {
-        badge.style.background = '';
-        badge.style.color = '';
         badge.textContent = `прохід ${s.results?.length ?? 0}/${s.targets?.length ?? targets.length}`;
         badge.className = 'badge run';
       } else if (v.autoSchedule) {

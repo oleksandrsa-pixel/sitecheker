@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Rank Peek — my-view SERP tracker",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Auto-sweeps your keyword/geo list through Google using YOUR own browser session and reports each tracked domain's real position.",
   "permissions": ["storage", "tabs", "alarms", "notifications"],
   "host_permissions": [
@@ -20,8 +20,12 @@
     "http://localhost/*",
     "https://api.telegram.org/*"
   ],
+  "icons": { "16": "icon.png", "32": "icon.png", "48": "icon.png", "128": "icon.png" },
   "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icon.png", "32": "icon.png", "48": "icon.png", "128": "icon.png" }
+  },
   "content_scripts": [
     {
       "matches": [
