@@ -428,31 +428,44 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('K. competitors.js — structured competitors view + CSV');
+  section('K. competitors.js — full SERP with own highlight, labels, copyable URLs');
   {
     const now = new Date().toISOString();
     const storage = makeStorage({
       lastChecks: {
-        'a.com|A|it': { site: 'A', keyword: 'A', geo: 'Italy', gl: 'it', domain: 'a.com', position: 2, error: null, checkedAt: now, competitors: [{ position: 3, host: 'rival1.com', title: 'R1', url: 'https://rival1.com/' }, { position: 5, host: 'rival2.com', title: 'R2', url: 'https://rival2.com/' }] },
-        'b.com|B|fr': { site: 'B', keyword: 'B', geo: 'France', gl: 'fr', domain: 'b.com', position: null, error: null, checkedAt: now, competitors: [] },
+        'zoccer-online-casino.com|zoccer|es': {
+          site: 'Zoccer', keyword: 'zoccer', geo: 'Spain', gl: 'es', domain: 'zoccer-online-casino.com',
+          position: 2, error: null, checkedAt: now,
+          serpTop: [
+            { position: 1, host: 'rival1.com', url: 'https://rival1.com/x', title: 'R1', own: false },
+            { position: 2, host: 'zoccer-online-casino.com', url: 'https://zoccer-online-casino.com/es-es/', title: 'Me', own: true },
+            { position: 3, host: 'trustpilot.com', url: 'https://trustpilot.com/review/zoccer', title: 'TP', own: false },
+          ],
+        },
+        'b.com|b|fr': { site: 'B', keyword: 'b', geo: 'France', gl: 'fr', domain: 'b.com', position: null, error: null, checkedAt: now, serpTop: [] },
       },
     });
     const ctx = loadFile('competitors.js', {
       chrome: { storage: { local: storage.local } },
       document: makeDocument(),
+      navigator: {},
       setInterval: () => 0,
       clearInterval: () => 0,
       setTimeout: () => 0,
       location: { href: 'chrome-extension://test/competitors.html' },
     });
     await flush();
+
+    const serp = ctx.buildSerp(storage.store.lastChecks['zoccer-online-casino.com|zoccer|es']);
+    ok(serp.find((x) => x.host === 'zoccer-online-casino.com').kind === 'you', 'K.1 own target classified as YOU');
+    ok(serp.find((x) => x.host === 'rival1.com').kind === 'comp', 'K.2 rival classified as competitor');
+    ok(serp.find((x) => x.host === 'trustpilot.com').kind === 'noise', 'K.3 aggregator classified as noise');
+
     const csv = ctx.buildCsv();
-    ok(csv.startsWith('﻿sep=,'), 'K.1 competitors CSV starts with BOM + sep=, hint');
-    ok(csv.includes('Домен конкурента'), 'K.2 competitors CSV header present');
-    ok(csv.includes('rival1.com') && csv.includes('rival2.com'), 'K.3 competitor domains present');
-    ok(csv.includes('(конкурентів не знайдено)'), 'K.4 empty-competitors row rendered');
-    const bodyLines = csv.split('\r\n');
-    ok(bodyLines.some((l) => l.startsWith('B,B,France,OUT')), 'K.5 my OUT position shown for B');
+    ok(csv.startsWith('﻿sep=,'), 'K.4 CSV starts with BOM + sep=, hint');
+    ok(csv.includes('Тип') && csv.includes('URL'), 'K.5 CSV has Тип + URL columns');
+    ok(csv.includes('ВАШ САЙТ') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.6 CSV labels every row type');
+    ok(csv.includes('https://zoccer-online-casino.com/es-es/'), 'K.7 full copyable URL present in export');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

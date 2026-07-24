@@ -318,12 +318,18 @@ async function updateLastCheck(result, ownDomains = []) {
 
   const top1 = (result.topResults && result.topResults[0] && result.topResults[0].host) || null;
 
-  // Top competitors for this query = organic results minus our own domains and
-  // aggregator noise. Kept per target so the Competitors tab can show them.
-  const competitors = (result.topResults || [])
-    .filter((x) => x && x.host && !isOwn(x.host, ownDomains) && !isNoise(x.host))
-    .slice(0, 5)
-    .map((x) => ({ position: x.position, host: x.host, title: x.title || '', url: x.url || '' }));
+  // Full top-10 SERP kept per target so the Competitors tab can show the WHOLE
+  // ranking around our site (own flagged), with full URLs. `own` = the host is
+  // one of the user's tracked domains.
+  const serpTop = (result.topResults || [])
+    .slice(0, 10)
+    .map((x) => ({
+      position: x.position,
+      host: x.host,
+      url: x.url || '',
+      title: x.title || '',
+      own: isOwn(x.host, ownDomains),
+    }));
 
   checks[key] = {
     site: result.site,
@@ -333,7 +339,7 @@ async function updateLastCheck(result, ownDomains = []) {
     gl: result.gl,
     position: result.position,
     top1: result.error ? base.top1 ?? null : top1,
-    competitors: result.error ? base.competitors || [] : competitors,
+    serpTop: result.error ? base.serpTop || [] : serpTop,
     checkedAt: result.collectedAt,
     error: result.error || null,
     // On an error we didn't get a new reading — keep the last known trend refs.

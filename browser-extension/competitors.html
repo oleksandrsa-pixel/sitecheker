@@ -51,12 +51,46 @@
   .p-good { background: rgba(52, 211, 153, 0.16); color: var(--green); }
   .p-mid { background: rgba(251, 191, 36, 0.16); color: var(--amber); }
   .p-bad { background: rgba(248, 113, 113, 0.16); color: var(--red); }
-  table.comp { width: 100%; border-collapse: collapse; }
-  table.comp td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; font-size: 13px; }
-  table.comp td.rank { width: 42px; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; white-space: nowrap; }
-  table.comp td.dom { width: 210px; }
-  table.comp td.dom a { color: #a5b4fc; text-decoration: none; word-break: break-all; }
-  table.comp td.title { color: var(--muted); }
+
+  .serp { display: flex; flex-direction: column; gap: 4px; }
+  .srow {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 7px 9px; border-radius: 8px; border: 1px solid transparent;
+    background: #12152400;
+  }
+  .srow:hover { background: rgba(255,255,255,0.02); }
+  .srow.k-you {
+    background: rgba(52, 211, 153, 0.10);
+    border-color: rgba(52, 211, 153, 0.55);
+    box-shadow: 0 0 0 1px rgba(52,211,153,.25), 0 0 14px rgba(52,211,153,.18);
+  }
+  .rk {
+    flex: 0 0 34px; text-align: right; color: var(--muted);
+    font: 12px ui-monospace, Consolas, monospace; padding-top: 2px;
+  }
+  .tag {
+    flex: 0 0 auto; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .3px; padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+    align-self: flex-start; margin-top: 1px;
+  }
+  .tag.k-you { background: var(--green); color: #06281c; }
+  .tag.k-own { background: rgba(52,211,153,.18); color: var(--green); }
+  .tag.k-comp { background: rgba(248,113,113,.16); color: var(--red); }
+  .tag.k-noise { background: #2a2f4a; color: var(--muted); }
+  .meta { flex: 1 1 auto; min-width: 0; }
+  .host { font-weight: 600; font-size: 13px; }
+  .host .ttl { font-weight: 400; color: var(--muted); }
+  .urlline { display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+  .url {
+    color: #a5b4fc; text-decoration: none; word-break: break-all;
+    font: 12px ui-monospace, Consolas, monospace; user-select: all;
+  }
+  .copy {
+    flex: 0 0 auto; font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer;
+  }
+  .copy:hover { color: var(--txt); border-color: var(--accent); }
+  .copy.ok { color: var(--green); border-color: var(--green); }
   .none { color: var(--muted); font-size: 13px; padding: 4px 0; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
   .badge { display:inline-block; font: 11px ui-monospace, monospace; color: var(--muted); }
