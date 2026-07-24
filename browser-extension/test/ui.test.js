@@ -195,6 +195,30 @@ async function main() {
     ok(csv.includes('▼OUT'), 'R.15 CSV change ▼OUT present');
     ok(csv.charCodeAt(0) === 0xfeff, 'R.16 CSV starts with BOM');
     ok(csv.startsWith('﻿sep=,'), 'R.17 report CSV carries the Excel sep=, hint');
+
+    // Partial coverage: 2 configured keywords, only 1 checked -> BOTH columns
+    // still appear (second pending), and site status = 'in' (one keyword #1).
+    const partialTargets = [
+      { site: 'P', domain: 'p.com', keyword: 'p', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'P', domain: 'p.com', keyword: 'p casino', gl: 'it', hl: 'it', geo: 'Italy' },
+    ];
+    const partialChecks = {
+      'p.com|p|it': { site: 'P', domain: 'p.com', geo: 'Italy', gl: 'it', keyword: 'p', position: 1, error: null, checkedAt: now },
+    };
+    const prow = ctx.buildRows(partialChecks, partialTargets, {}).find((r) => r.domain === 'p.com');
+    ok(prow && prow.keywords.length === 2, 'R.18 both keyword columns present with partial data');
+    ok(prow && prow.keywords[1].pending === true, 'R.19 unchecked keyword marked pending');
+    ok(prow && prow.status === 'in', 'R.20 site status = in (ranks #1 by one keyword)');
+
+    // Out only when ALL checked and all out
+    const outChecks = {
+      'p.com|p|it': { site: 'P', domain: 'p.com', geo: 'Italy', gl: 'it', keyword: 'p', position: 8, error: null, checkedAt: now },
+      'p.com|p casino|it': { site: 'P', domain: 'p.com', geo: 'Italy', gl: 'it', keyword: 'p casino', position: 9, error: null, checkedAt: now },
+    };
+    const orow = ctx.buildRows(outChecks, partialTargets, {}).find((r) => r.domain === 'p.com');
+    ok(orow && orow.status === 'out', 'R.21 site status = out when ALL keywords out');
+    const stillPending = ctx.buildRows({ 'p.com|p|it': outChecks['p.com|p|it'] }, partialTargets, {}).find((r) => r.domain === 'p.com');
+    ok(stillPending && stillPending.status === 'pending', 'R.22 status = pending until all keywords checked');
   }
 
   // ---------------------------------------------------------------------

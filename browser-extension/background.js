@@ -214,41 +214,84 @@ function positionAround(hist, agoMs) {
   return found ? found.pos : undefined;
 }
 
-// Decide whether a result crossed the alert threshold vs the previous sweep and,
-// if so, push a per-site Telegram message. Persists last position per target.
-async function maybeAlert(s, result) {
-  // Ignore technical failures (CAPTCHA/consent/timeout) — not a real drop.
-  if (result.error) return;
-
-  const maxPos = s.alertMaxPos ?? 5;
-  const key = `${result.domain}|${result.keyword}|${result.gl}`;
-  const store = (await chrome.storage.local.get('lastPositions')).lastPositions || {};
-  const prev = key in store ? store[key] : undefined; // number | null | undefined
-  const cur = result.position; // number | null
-
-  const isBad = cur == null || cur > maxPos;
-  const wasBad = prev === null || (typeof prev === 'number' && prev > maxPos);
-
-  let msg = null;
-  if (isBad && !wasBad) {
-    const reason = cur == null ? `❌ ЗНИК із видачі` : `⬇ Випав із топ-${maxPos}`;
-    const prevTxt = prev === undefined ? '—' : prev == null ? 'поза видачею' : `#${prev}`;
-    const curTxt = cur == null ? 'немає у видачі' : `#${cur}`;
-    msg =
-      `🔴 <b>${result.site}</b> · ${result.geo} · «${result.keyword}»\n` +
-      `${reason}\n` +
-      `Позиція: ${prevTxt} → ${curTxt}\n` +
-      `🕒 ${result.collectedAt}\n` +
-      `https://${result.domain}`;
-  } else if (!isBad && wasBad) {
-    msg =
-      `🟢 <b>${result.site}</b> · ${result.geo} · «${result.keyword}»\n` +
-      `Повернувся в топ-${maxPos}: #${cur}\n🕒 ${result.collectedAt}`;
+// Aggregate the per-keyword checks into a per-SITE view (one site = one
+// domain+geo). A site counts as "in top" if it ranks <= maxPos by AT LEAST ONE
+// of its keywords; it's "out" only when ALL its keywords are out. Status:
+//   'in'      — at least one keyword in top-N
+//   'out'     — every keyword out of top-N (and all configured keywords checked)
+//   'pending' — not all configured keywords checked yet (don't judge/alert)
+//   'unknown' — only errors so far
+function siteAggregate(lastChecks, sweepTargets, maxPos) {
+  // configured keyword set per site (so a partial check isn't judged as "out")
+  const configured = new Map();
+  for (const t of sweepTargets || []) {
+    if (!t || !t.domain || !t.gl) continue;
+    const k = `${registrable(t.domain)}|${t.gl}`;
+    if (!configured.has(k)) configured.set(k, new Set());
+    configured.get(k).add(t.keyword);
   }
+  const sites = new Map();
+  for (const c of Object.values(lastChecks || {})) {
+    if (!c || !c.domain) continue;
+    const k = `${registrable(c.domain)}|${c.gl || ''}`;
+    if (!sites.has(k)) {
+      sites.set(k, {
+        key: k,
+        site: c.site || registrable(c.domain),
+        geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
+        domain: registrable(c.domain),
+        gl: c.gl || '',
+        entries: [],
+      });
+    }
+    sites.get(k).entries.push(c);
+  }
+  const out = [];
+  for (const [k, s] of sites) {
+    const nonErr = s.entries.filter((e) => !e.error);
+    const cfg = configured.get(k);
+    const checked = new Set(s.entries.map((e) => e.keyword));
+    const allChecked = cfg ? [...cfg].every((kw) => checked.has(kw)) : true;
+    let status;
+    if (!nonErr.length) status = 'unknown';
+    else if (nonErr.some((e) => e.position != null && e.position <= maxPos)) status = 'in';
+    else if (cfg && !allChecked) status = 'pending';
+    else status = 'out';
+    const positions = nonErr.map((e) => e.position).filter((p) => typeof p === 'number');
+    out.push({ ...s, status, bestPos: positions.length ? Math.min(...positions) : null });
+  }
+  return out;
+}
 
-  store[key] = cur;
-  await chrome.storage.local.set({ lastPositions: store });
+// Per-SITE transition alert: fire only when a site crosses in<->out (out = it
+// fell out of top-N by ALL its keywords). If it still ranks by at least one
+// keyword, stay silent. Baseline (first definitive status) never alerts.
+async function maybeAlertSite(s, result) {
+  if (result.error) return; // a single keyword's technical failure isn't a drop
+  const maxPos = s.alertMaxPos ?? 5;
+  const data = await chrome.storage.local.get(['lastChecks', 'sweepTargets', 'siteStatus']);
+  const key = `${registrable(result.domain)}|${result.gl}`;
+  const site = siteAggregate(data.lastChecks || {}, data.sweepTargets || [], maxPos).find(
+    (x) => x.key === key,
+  );
+  if (!site || site.status === 'pending' || site.status === 'unknown') return;
 
+  const store = data.siteStatus || {};
+  const prev = store[key]; // 'in' | 'out' | undefined
+  store[key] = site.status;
+  await chrome.storage.local.set({ siteStatus: store });
+  if (prev === undefined || prev === site.status) return; // baseline / no change
+
+  const bestTxt = site.bestPos != null ? `#${site.bestPos}` : 'немає у видачі';
+  let msg = null;
+  if (site.status === 'out') {
+    msg =
+      `🔴 <b>${site.site}</b> · ${site.geo}\n` +
+      `Випав із топ-${maxPos} по ВСІХ ключах\n` +
+      `Найкраща позиція: ${bestTxt}\n🕒 ${result.collectedAt}\nhttps://${site.domain}`;
+  } else if (site.status === 'in') {
+    msg = `🟢 <b>${site.site}</b> · ${site.geo}\nЗнову в топ-${maxPos}: ${bestTxt}\n🕒 ${result.collectedAt}`;
+  }
   if (msg) await sendTelegram(s.telegramToken, s.telegramChatId, msg);
 }
 
@@ -315,21 +358,20 @@ async function updateLastCheck(result, ownDomains = []) {
 // `digestEveryRun` setting (default ON).
 async function sendSweepDigest(s) {
   if (!s.telegramToken || !s.telegramChatId) return;
-  const v = await chrome.storage.local.get(['digestEveryRun', 'lastChecks']);
+  const v = await chrome.storage.local.get(['digestEveryRun', 'lastChecks', 'sweepTargets']);
   if (v.digestEveryRun === false) return;
-  const checks = v.lastChecks || {};
   const maxPos = s.alertMaxPos ?? 5;
 
-  const ok = s.results.filter((r) => !r.error);
-  const bad = ok.filter((r) => r.position == null || r.position > maxPos);
-  const inTop = ok.length - bad.length;
+  const sites = siteAggregate(v.lastChecks || {}, v.sweepTargets || [], maxPos);
+  const bad = sites.filter((x) => x.status === 'out');
+  const inTop = sites.filter((x) => x.status === 'in').length;
+  const known = sites.filter((x) => x.status === 'in' || x.status === 'out').length;
 
-  if (ok.length === 0) {
+  if (known === 0) {
     await sendTelegram(
       s.telegramToken,
       s.telegramChatId,
-      `⚠ <b>Rank Peek</b> — прохід завершено, але результатів нема ` +
-        `(${s.results.length} помилок/блокувань).\n🕒 ${fmtNow()}`,
+      `⚠ <b>Rank Peek</b> — прохід завершено, але результатів нема (помилки/блокування).\n🕒 ${fmtNow()}`,
     );
     return;
   }
@@ -338,26 +380,20 @@ async function sendSweepDigest(s) {
     await sendTelegram(
       s.telegramToken,
       s.telegramChatId,
-      `✅ <b>Rank Peek</b> — прохід завершено.\n` +
-        `Усі ${inTop} цілей у топ-${maxPos}. Проблемних нема.\n🕒 ${fmtNow()}`,
+      `✅ <b>Rank Peek</b> — прохід завершено.\nУсі ${inTop} сайтів у топ-${maxPos} (хоча б по одному ключу). Проблемних нема.\n🕒 ${fmtNow()}`,
     );
     return;
   }
 
-  bad.sort((a, b) => {
-    const pa = a.position == null ? 1e9 : a.position;
-    const pb = b.position == null ? 1e9 : b.position;
-    return pb - pa; // OUT first, then worst rank first
-  });
+  bad.sort((a, b) => (a.bestPos == null ? 1e9 : a.bestPos) - (b.bestPos == null ? 1e9 : b.bestPos) || 0);
+  bad.reverse(); // OUT first, then worst
 
-  const lines = bad.map((r) => {
-    const lc = checks[`${r.domain}|${r.keyword}|${r.gl}`] || {};
-    const curTxt = r.position == null ? 'OUT' : `#${r.position}`;
-    return `• <b>${r.site}</b> · ${r.geo} · «${r.keyword}» — ${curTxt} ${trendText(lc.prevPosition, r.position)}`;
-  });
+  const lines = bad.map(
+    (x) => `• <b>${x.site}</b> · ${x.geo} — поза топ-${maxPos} (найкраща: ${x.bestPos != null ? '#' + x.bestPos : 'OUT'})`,
+  );
 
   const msg =
-    `⚠ <b>Rank Peek</b> — поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})\n` +
+    `⚠ <b>Rank Peek</b> — сайтів поза топ-${maxPos} (по всіх ключах): <b>${bad.length}</b> (у топі: ${inTop})\n` +
     lines.join('\n') +
     `\n🕒 ${fmtNow()}`;
   await sendTelegramChunked(s.telegramToken, s.telegramChatId, msg);
@@ -417,15 +453,16 @@ async function sendDailyDigest() {
     'telegramChatId',
     'alertMaxPos',
     'lastChecks',
+    'sweepTargets',
   ]);
   if (!cfg.telegramToken || !cfg.telegramChatId) return;
   const maxPos = Number(cfg.alertMaxPos) || 5;
   const checks = Object.values(cfg.lastChecks || {});
   if (!checks.length) return;
 
-  const ok = checks.filter((c) => !c.error);
-  const bad = ok.filter((c) => c.position == null || c.position > maxPos);
-  const inTop = ok.length - bad.length;
+  const sites = siteAggregate(cfg.lastChecks || {}, cfg.sweepTargets || [], maxPos);
+  const bad = sites.filter((x) => x.status === 'out');
+  const inTop = sites.filter((x) => x.status === 'in').length;
 
   // Freshness: targets not checked in the last ~26h (laptop asleep / CAPTCHA /
   // never reached). Honest note so a stale report isn't mistaken for "all good".
@@ -434,32 +471,27 @@ async function sendDailyDigest() {
     const t = c.checkedAt ? new Date(c.checkedAt).getTime() : NaN;
     return Number.isNaN(t) || t < staleCut || c.error;
   }).length;
-  const staleLine = stale ? `\n⚠ ${stale} цілей не перевірено за добу (сон/блокування).` : '';
+  const staleLine = stale ? `\n⚠ ${stale} перевірок застарілих (>24 год: сон/блокування).` : '';
 
   if (bad.length === 0) {
     await sendTelegram(
       cfg.telegramToken,
       cfg.telegramChatId,
-      `☀️ <b>Rank Peek</b> — щоденний звіт\nУсі ${inTop} цілей у топ-${maxPos}. Проблемних нема.${staleLine}\n🕒 ${fmtNow()}`,
+      `☀️ <b>Rank Peek</b> — щоденний звіт\nУсі ${inTop} сайтів у топ-${maxPos} (хоча б по одному ключу). Проблемних нема.${staleLine}\n🕒 ${fmtNow()}`,
     );
     return;
   }
 
-  bad.sort((a, b) => {
-    const pa = a.position == null ? 1e9 : a.position;
-    const pb = b.position == null ? 1e9 : b.position;
-    return pb - pa;
-  });
+  bad.sort((a, b) => (a.bestPos == null ? 1e9 : a.bestPos) - (b.bestPos == null ? 1e9 : b.bestPos));
+  bad.reverse();
 
-  const lines = bad.map((c) => {
-    const base = c.yesterdayPosition !== undefined ? c.yesterdayPosition : c.prevPosition;
-    const curTxt = c.position == null ? 'OUT' : `#${c.position}`;
-    return `• <b>${c.site}</b> · ${c.geo} · «${c.keyword}» — ${curTxt} ${trendText(base, c.position)}`;
-  });
+  const lines = bad.map(
+    (x) => `• <b>${x.site}</b> · ${x.geo} — поза топ-${maxPos} по всіх ключах (найкраща: ${x.bestPos != null ? '#' + x.bestPos : 'OUT'})`,
+  );
 
   const msg =
     `☀️ <b>Rank Peek</b> — щоденний звіт\n` +
-    `Поза топ-${maxPos}: <b>${bad.length}</b> (у топі: ${inTop})${staleLine}\n` +
+    `Сайтів поза топ-${maxPos} (по всіх ключах): <b>${bad.length}</b> (у топі: ${inTop})${staleLine}\n` +
     lines.join('\n') +
     `\n🕒 ${fmtNow()}`;
   await sendTelegramChunked(cfg.telegramToken, cfg.telegramChatId, msg);
@@ -666,8 +698,8 @@ async function recordAndAdvance(result) {
   s.results.push(result);
   s.consecutiveErrors = result.error ? (s.consecutiveErrors || 0) + 1 : 0;
 
-  await maybeAlert(s, result); // immediate per-site Telegram alert on drop / recovery
-  await updateLastCheck(result, (s.targets || []).map((t) => t.domain)); // persist per site
+  await updateLastCheck(result, (s.targets || []).map((t) => t.domain)); // persist first
+  await maybeAlertSite(s, result); // per-SITE alert (out only if all keywords out)
   try {
     await fetch(s.ingestUrl, {
       method: 'POST',

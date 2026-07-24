@@ -284,38 +284,40 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('2. Telegram: recurring digest every sweep + one-time drop alert');
+  section('2. Per-SITE alerts: in-top by ANY keyword = silent; out by ALL = alert');
   {
     const env = makeEnv();
     loadBackground(env);
     const fire = makeDriver(env);
+    // ONE site, TWO keywords, one geo.
     env.store.sweepTargets = [
-      { site: 'A', domain: 'a.com', keyword: 'A', gl: 'it', hl: 'it', geo: 'Italy' },
-      { site: 'B', domain: 'b.com', keyword: 'B', gl: 'fr', hl: 'fr', geo: 'France' },
+      { site: 'Brandy', domain: 's.com', keyword: 'brand', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'Brandy', domain: 's.com', keyword: 'brand casino', gl: 'it', hl: 'it', geo: 'Italy' },
     ];
     env.store.telegramToken = 'TOK';
     env.store.telegramChatId = 'CHAT';
     env.store.alertMaxPos = 5;
-    // A in top (#2), B out of top (#8) — both runs identical.
-    const serpFor = (t) => serpWithTarget(t.domain, t.keyword === 'A' ? 2 : 8);
 
-    await runSweep(env, fire, serpFor);
-    const run1 = env.calls.tg.slice();
-    const drop1 = run1.filter((m) => m.includes('Випав із топ')).length;
-    const digest1 = run1.filter((m) => m.includes('поза топ-5')).length;
-    ok(drop1 === 1, '2.1 run1: exactly one transition drop-alert for B', String(drop1));
-    ok(digest1 === 1, '2.2 run1: digest sent', String(digest1));
-    ok(run1.some((m) => m.includes('поза топ-5: <b>1</b>')), '2.3 run1 digest counts 1 out-of-top');
+    // run1: in top by ONE keyword (brand #2), the other out (#8) -> site OK, silent
+    await runSweep(env, fire, (t) => serpWithTarget('s.com', t.keyword === 'brand' ? 2 : 8));
+    let tg = env.calls.tg.slice();
+    ok(!tg.some((m) => m.includes('Випав із топ')), '2.1 run1: NO drop alert (in top by 1 keyword)');
+    ok(tg.some((m) => m.includes('Проблемних нема')), '2.2 run1 digest: all-clear (site counts as in top)');
 
+    // run2: out by ALL keywords (both #8) -> transition in->out -> one drop alert
     env.calls.tg.length = 0;
-    await runSweep(env, fire, serpFor);
-    const run2 = env.calls.tg.slice();
-    const drop2 = run2.filter((m) => m.includes('Випав із топ')).length;
-    const digest2 = run2.filter((m) => m.includes('поза топ-5')).length;
-    ok(drop2 === 0, '2.4 run2: NO new transition alert (state unchanged)', String(drop2));
-    ok(digest2 === 1, '2.5 run2: digest STILL sent (recurring reminder)', String(digest2));
-    ok(run2.some((m) => m.includes('«B»') && m.includes('#8')), '2.6 run2 digest lists B at #8');
-    ok(run2.some((m) => m.includes('#8 =')), '2.7 run2 trend vs previous sweep is "=" (8->8)');
+    await runSweep(env, fire, () => serpWithTarget('s.com', 8));
+    tg = env.calls.tg.slice();
+    ok(tg.filter((m) => m.includes('Випав із топ')).length === 1, '2.3 run2: exactly one drop alert when out by ALL keywords', String(tg.filter((m) => m.includes('Випав із топ')).length));
+    ok(tg.some((m) => m.includes('поза топ-5')), '2.4 run2 digest lists the site as out');
+    ok(env.store.siteStatus['s.com|it'] === 'out', '2.5 site status persisted as out');
+
+    // run3: back in top by one keyword -> recovery alert
+    env.calls.tg.length = 0;
+    await runSweep(env, fire, (t) => serpWithTarget('s.com', t.keyword === 'brand' ? 2 : 8));
+    tg = env.calls.tg.slice();
+    ok(tg.filter((m) => m.includes('Знову в топ')).length === 1, '2.6 run3: one recovery alert when back in top by a keyword');
+    ok(tg.some((m) => m.includes('Проблемних нема')), '2.7 run3 digest: all-clear again');
   }
 
   // ---------------------------------------------------------------------
@@ -558,10 +560,10 @@ async function main() {
     await fire.alarm('dailyReport');
     const m = env.calls.tg.find((x) => x.includes('щоденний звіт'));
     ok(!!m, '11.1 daily report sent');
-    ok(m && m.includes('Поза топ-5: <b>2</b>'), '11.2 counts 2 out of top (B #8, C OUT)');
-    ok(m && m.includes('«B»') && m.includes('🔴▼4'), '11.3 B trend vs yesterday 4->8 = ▼4');
-    ok(m && m.includes('«C»') && m.includes('OUT'), '11.4 C shown as OUT');
-    ok(!m || !m.includes('«A»'), '11.5 in-top A not listed');
+    ok(m && m.includes('<b>2</b>') && m.includes('поза топ-5'), '11.2 counts 2 sites out of top (B #8, C OUT)');
+    ok(m && m.includes('France') && m.includes('#8'), '11.3 B listed, best #8');
+    ok(m && m.includes('Spain') && m.includes('OUT'), '11.4 C shown as OUT');
+    ok(!m || !m.includes('Italy'), '11.5 in-top A (Italy) not listed');
 
     // all-clear variant
     const env2 = makeEnv();

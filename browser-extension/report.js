@@ -70,37 +70,59 @@ let MAX_KW = 0;
 let sortKey = 'site';
 let sortDir = 1;
 
-// Build the pivot from lastChecks (+ sweepTargets for keyword ordering, +
-// history for the per-cell trend / "yesterday" reference).
-function buildRows(lastChecks, sweepTargets, historyAll) {
-  // Preferred keyword order per site (main keyword first, as stored in targets).
-  const order = new Map(); // `${domain}|${gl}` -> [keyword, ...]
-  (Array.isArray(sweepTargets) ? sweepTargets : []).forEach((t) => {
-    if (!t || !t.domain || !t.gl) return;
-    const k = `${registrable(t.domain)}|${t.gl}`;
-    if (!order.has(k)) order.set(k, []);
-    const arr = order.get(k);
-    if (!arr.includes(t.keyword)) arr.push(t.keyword);
-  });
+// Site-level status from its keyword cells (mirrors background siteAggregate):
+// 'in' = ranks <=5 by at least one keyword; 'out' = all checked keywords out
+// AND nothing pending; 'pending' = still waiting on some keyword; 'unknown' =
+// only errors so far.
+function siteStatus(keywords) {
+  const checked = keywords.filter((k) => !k.pending);
+  const nonErr = checked.filter((k) => !k.error);
+  if (!checked.length) return 'pending';
+  if (nonErr.some((k) => k.position != null && k.position <= 5)) return 'in';
+  if (keywords.some((k) => k.pending)) return 'pending';
+  if (!nonErr.length) return 'unknown';
+  return 'out';
+}
 
+// Build the pivot: ONE row per site (domain+geo), a column per keyword. Seeded
+// from sweepTargets so BOTH keyword columns always show (pending as "—" until
+// checked), then overlaid with actual checks + history.
+function buildRows(lastChecks, sweepTargets, historyAll) {
   const hist = historyAll || {};
-  const groups = new Map(); // `${domain}|${gl}` -> row
-  Object.entries(lastChecks || {}).forEach(([key, c]) => {
-    if (!c || !c.domain) return;
-    const gl = c.gl || '';
-    const gkey = `${registrable(c.domain)}|${gl}`;
-    if (!groups.has(gkey)) {
-      groups.set(gkey, {
-        site: c.site || registrable(c.domain),
-        domain: registrable(c.domain),
-        geo: c.geo || (gl ? gl.toUpperCase() : ''),
-        gl,
-        lastChecked: c.checkedAt || '',
-        _kw: new Map(), // keyword -> cell
+  const groups = new Map();
+  const ensure = (site, domain, geo, gl) => {
+    const key = `${registrable(domain)}|${gl || ''}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        site: site || registrable(domain),
+        domain: registrable(domain),
+        geo: geo || (gl ? gl.toUpperCase() : ''),
+        gl: gl || '',
+        lastChecked: '',
+        order: [],
+        kw: new Map(),
       });
     }
-    const row = groups.get(gkey);
-    row._kw.set(c.keyword, {
+    return groups.get(key);
+  };
+
+  // 1) Seed every configured target so both keyword columns always appear.
+  (Array.isArray(sweepTargets) ? sweepTargets : []).forEach((t) => {
+    if (!t || !t.domain || !t.keyword) return;
+    const g = ensure(t.site, t.domain, t.geo, t.gl);
+    if (!g.kw.has(t.keyword)) {
+      g.kw.set(t.keyword, { keyword: t.keyword, pending: true });
+      g.order.push(t.keyword);
+    }
+  });
+
+  // 2) Overlay actual checks.
+  Object.entries(lastChecks || {}).forEach(([key, c]) => {
+    if (!c || !c.domain) return;
+    const g = ensure(c.site, c.domain, c.geo, c.gl);
+    if (!g.kw.has(c.keyword)) g.order.push(c.keyword);
+    g.kw.set(c.keyword, {
       keyword: c.keyword,
       position: c.position,
       error: c.error || null,
@@ -109,26 +131,20 @@ function buildRows(lastChecks, sweepTargets, historyAll) {
       prevPosition: c.prevPosition,
       yesterdayPosition: c.yesterdayPosition,
       hist: (hist[key] || []).slice(-8).map((h) => h.pos),
+      pending: false,
     });
-    if (c.checkedAt && (!row.lastChecked || c.checkedAt > row.lastChecked)) {
-      row.lastChecked = c.checkedAt;
-    }
+    if (c.checkedAt && (!g.lastChecked || c.checkedAt > g.lastChecked)) g.lastChecked = c.checkedAt;
   });
 
   const rows = [];
   let maxKw = 0;
-  for (const [gkey, row] of groups) {
-    const preferred = order.get(gkey) || [];
-    const present = [...row._kw.keys()];
-    // Keywords in target order first, then any extras (shortest = brand first).
-    const ordered = [
-      ...preferred.filter((k) => row._kw.has(k)),
-      ...present.filter((k) => !preferred.includes(k)).sort((a, b) => a.length - b.length),
-    ];
-    row.keywords = ordered.map((k) => row._kw.get(k));
-    delete row._kw;
-    maxKw = Math.max(maxKw, row.keywords.length);
-    rows.push(row);
+  for (const [, g] of groups) {
+    g.keywords = g.order.map((k) => g.kw.get(k));
+    delete g.kw;
+    delete g.order;
+    g.status = siteStatus(g.keywords);
+    maxKw = Math.max(maxKw, g.keywords.length);
+    rows.push(g);
   }
   MAX_KW = Math.max(1, maxKw);
   return rows;
@@ -141,8 +157,8 @@ function bestPos(row) {
 }
 
 function rowIsBad(row) {
-  // Any keyword out of top-5 (or missing / errored) makes the row "problematic".
-  return row.keywords.some((c) => c.error || c.position == null || c.position > 5);
+  // "Problematic" = the SITE is out of top-5 by ALL its keywords.
+  return row.status === 'out';
 }
 
 function applyView() {
@@ -180,9 +196,15 @@ function applyView() {
 
   renderHead();
   renderBody(view);
-  $('sub').textContent = `${view.length} з ${ROWS.length} сайтів · показано ${
-    view.reduce((n, r) => n + r.keywords.length, 0)
-  } перевірок`;
+  const shownChecks = view.reduce((n, r) => n + r.keywords.filter((c) => !c.pending).length, 0);
+  $('sub').textContent = `${view.length} з ${ROWS.length} сайтів · показано ${shownChecks} перевірок`;
+}
+
+function statusPill(status) {
+  if (status === 'in') return '<span class="sstatus s-in">🟢 в топі</span>';
+  if (status === 'out') return '<span class="sstatus s-out">🔴 поза топ-5</span>';
+  if (status === 'unknown') return '<span class="sstatus s-un">⚠ помилка</span>';
+  return '<span class="sstatus s-pend">⏳ перевіряю</span>';
 }
 
 function renderHead() {
@@ -222,19 +244,24 @@ function renderBody(view) {
       const kwCells = [];
       for (let i = 0; i < MAX_KW; i += 1) {
         const c = r.keywords[i];
-        kwCells.push(
-          `<td class="kwcell">${
-            c
-              ? `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
-                `<div class="poscell"${histTitle(c)}>${pill(c)}${trendHtml(c)}</div>` +
-                prevLine(c)
-              : '<span class="pill p-none">—</span>'
-          }</td>`,
-        );
+        let inner;
+        if (!c) {
+          inner = '<span class="pill p-none">—</span>';
+        } else if (c.pending) {
+          inner =
+            `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
+            `<span class="pill p-none">—</span><div class="prev">очікує</div>`;
+        } else {
+          inner =
+            `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
+            `<div class="poscell"${histTitle(c)}>${pill(c)}${trendHtml(c)}</div>` +
+            prevLine(c);
+        }
+        kwCells.push(`<td class="kwcell">${inner}</td>`);
       }
       return (
         '<tr>' +
-        `<td class="site">${r.site}</td>` +
+        `<td class="site">${r.site}<div>${statusPill(r.status)}</div></td>` +
         `<td class="domain">${r.domain}</td>` +
         `<td class="geo">${r.geo}</td>` +
         kwCells.join('') +
@@ -246,18 +273,18 @@ function renderBody(view) {
 }
 
 function renderCards() {
-  const allCells = ROWS.flatMap((r) => r.keywords);
-  const total = allCells.length;
-  const top3 = allCells.filter((c) => typeof c.position === 'number' && c.position <= 3).length;
-  const top5 = allCells.filter((c) => typeof c.position === 'number' && c.position <= 5).length;
-  const out = allCells.filter((c) => !c.error && c.position == null).length;
-  const err = allCells.filter((c) => c.error).length;
+  const cells = ROWS.flatMap((r) => r.keywords).filter((c) => !c.pending);
+  const total = cells.length;
+  const top5 = cells.filter((c) => typeof c.position === 'number' && c.position <= 5).length;
+  const err = cells.filter((c) => c.error).length;
+  const sitesOut = ROWS.filter((r) => r.status === 'out').length; // key metric = alertable
+  const sitesIn = ROWS.filter((r) => r.status === 'in').length;
   const cards = [
     { n: ROWS.length, l: 'Сайтів' },
+    { n: sitesIn, l: 'Сайтів у топі' },
+    { n: sitesOut, l: 'Сайтів поза топ' },
     { n: total, l: 'Перевірок' },
-    { n: top3, l: 'У топ-3' },
-    { n: top5, l: 'У топ-5' },
-    { n: out, l: 'Поза видачею' },
+    { n: top5, l: 'Ключів у топ-5' },
     { n: err, l: 'Помилки' },
   ];
   $('cards').innerHTML = cards
@@ -281,21 +308,21 @@ function csvEscape(v) {
 }
 
 function posText(c) {
-  if (!c) return '';
+  if (!c || c.pending) return '';
   if (c.error) return 'ERR';
   if (c.position == null) return 'OUT';
   return c.position;
 }
 
 function yesterdayText(cell) {
-  if (!cell) return '';
+  if (!cell || cell.pending) return '';
   const y = cell.yesterdayPosition;
   if (y === undefined) return '';
   return y == null ? 'OUT' : `#${y}`;
 }
 
 function deltaText(cell) {
-  if (!cell) return '';
+  if (!cell || cell.pending) return '';
   const { base } = trendBase(cell);
   const cur = cell.position;
   if (base === undefined) return 'new';
