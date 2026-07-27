@@ -58,6 +58,7 @@ function makeEl() {
     checked: false,
     style: {},
     files: [],
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     addEventListener() {},
     removeEventListener() {},
     setAttribute() {},
@@ -208,7 +209,7 @@ async function main() {
     const prow = ctx.buildRows(partialChecks, partialTargets, {}).find((r) => r.domain === 'p.com');
     ok(prow && prow.keywords.length === 2, 'R.18 both keyword columns present with partial data');
     ok(prow && prow.keywords[1].pending === true, 'R.19 unchecked keyword marked pending');
-    ok(prow && prow.status === 'in', 'R.20 site status = in (ranks #1 by one keyword)');
+    ok(prow && ctx.rowStatus(prow) === 'in', 'R.20 site status = in (ranks #1 by one keyword)');
 
     // Out only when ALL checked and all out
     const outChecks = {
@@ -216,9 +217,9 @@ async function main() {
       'p.com|p casino|it': { site: 'P', domain: 'p.com', geo: 'Italy', gl: 'it', keyword: 'p casino', position: 9, error: null, checkedAt: now },
     };
     const orow = ctx.buildRows(outChecks, partialTargets, {}).find((r) => r.domain === 'p.com');
-    ok(orow && orow.status === 'out', 'R.21 site status = out when ALL keywords out');
+    ok(orow && ctx.rowStatus(orow) === 'out', 'R.21 site status = out when ALL keywords out');
     const stillPending = ctx.buildRows({ 'p.com|p|it': outChecks['p.com|p|it'] }, partialTargets, {}).find((r) => r.domain === 'p.com');
-    ok(stillPending && stillPending.status === 'pending', 'R.22 status = pending until all keywords checked');
+    ok(stillPending && ctx.rowStatus(stillPending) === 'pending', 'R.22 status = pending until all keywords checked');
   }
 
   // ---------------------------------------------------------------------
@@ -466,6 +467,37 @@ async function main() {
     ok(csv.includes('Тип') && csv.includes('URL'), 'K.5 CSV has Тип + URL columns');
     ok(csv.includes('ВАШ САЙТ') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.6 CSV labels every row type');
     ok(csv.includes('https://zoccer-online-casino.com/es-es/'), 'K.7 full copyable URL present in export');
+  }
+
+  // ---------------------------------------------------------------------
+  section('RY. report yesterday mode (positions ~24h ago)');
+  {
+    const nowMs = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    const storage = makeStorage({
+      sweepTargets: [{ site: 'A', domain: 'a.com', keyword: 'a', gl: 'it', hl: 'it', geo: 'Italy' }],
+      lastChecks: { 'a.com|a|it': { site: 'A', domain: 'a.com', geo: 'Italy', gl: 'it', keyword: 'a', position: 8, error: null, checkedAt: iso(nowMs) } },
+      history: { 'a.com|a|it': [{ pos: 3, at: iso(nowMs - 25 * 3600 * 1000) }, { pos: 8, at: iso(nowMs) }] },
+    });
+    const ctx = loadFile('report.js', {
+      chrome: { storage: { local: storage.local } },
+      document: makeDocument(),
+      setInterval: () => 0,
+      clearInterval: () => 0,
+      setTimeout: () => 0,
+      location: { href: 'chrome-extension://test/report.html', search: '' },
+    });
+    await flush();
+    const rows = ctx.buildRows(storage.store.lastChecks, storage.store.sweepTargets, storage.store.history);
+    const cell = rows[0].keywords[0];
+    ok(cell.position === 8, 'RY.1 today position = 8');
+    ok(cell.yPos === 3, 'RY.2 yesterday position (from history ~24h ago) = 3');
+    ok(ctx.rowStatus(rows[0]) === 'out', 'RY.3 today: site OUT (8 > 5)');
+    ctx.setDay('yesterday');
+    ok(ctx.dispPos(cell) === 3, 'RY.4 yesterday mode dispPos = 3');
+    ok(ctx.rowStatus(rows[0]) === 'in', 'RY.5 yesterday: site IN (3 <= 5)');
+    ctx.setDay('today');
+    ok(ctx.rowStatus(rows[0]) === 'out', 'RY.6 back to today: OUT again');
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

@@ -109,6 +109,9 @@ $('stop').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'ra
 $('report').addEventListener('click', () =>
   chrome.tabs.create({ url: chrome.runtime.getURL('report.html') }),
 );
+$('reporty').addEventListener('click', () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL('report.html?day=yesterday') }),
+);
 
 function stamp() {
   const d = new Date();

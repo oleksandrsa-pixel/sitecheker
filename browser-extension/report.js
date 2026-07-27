@@ -9,6 +9,31 @@ const $ = (id) => document.getElementById(id);
 
 const registrable = (h) => (h || '').replace(/^www\./, '').toLowerCase();
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// 'today' shows the latest positions; 'yesterday' shows positions ~24h ago
+// (reconstructed from each target's history). Set from ?day=yesterday on load.
+let DAY_MODE = 'today';
+
+// Latest history position that is at least `agoMs` old (i.e. "yesterday").
+function positionAround(hist, agoMs) {
+  const cutoff = Date.now() - agoMs;
+  let found;
+  for (const h of hist || []) {
+    const t = new Date(h.at).getTime();
+    if (!Number.isNaN(t) && t <= cutoff) found = h;
+  }
+  return found ? found.pos : undefined;
+}
+
+// Position / pending to DISPLAY for the active day mode.
+function dispPos(cell) {
+  return DAY_MODE === 'yesterday' ? cell.yPos : cell.position;
+}
+function dispPending(cell) {
+  return DAY_MODE === 'yesterday' ? cell.yPos === undefined : cell.pending;
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -21,11 +46,12 @@ function fmtTime(iso) {
 
 function pill(cell) {
   if (!cell) return '<span class="pill p-none">—</span>';
-  if (cell.error) return `<span class="pill p-bad" title="${cell.error}">err</span>`;
-  if (cell.position == null) return '<span class="pill p-bad">OUT</span>';
-  const cls = cell.position <= 3 ? 'p-good' : cell.position <= 5 ? 'p-mid' : 'p-bad';
-  const t = cell.top1 ? ` title="#1: ${cell.top1}"` : '';
-  return `<span class="pill ${cls}"${t}>#${cell.position}</span>`;
+  if (DAY_MODE === 'today' && cell.error) return `<span class="pill p-bad" title="${cell.error}">err</span>`;
+  const pos = dispPos(cell);
+  if (pos == null) return '<span class="pill p-bad">OUT</span>';
+  const cls = pos <= 3 ? 'p-good' : pos <= 5 ? 'p-mid' : 'p-bad';
+  const t = cell.top1 && DAY_MODE === 'today' ? ` title="#1: ${cell.top1}"` : '';
+  return `<span class="pill ${cls}"${t}>#${pos}</span>`;
 }
 
 // Baseline for the trend arrow: the position ~24h ago if we have it, otherwise
@@ -38,6 +64,7 @@ function trendBase(cell) {
 
 // Colored arrow showing movement vs the baseline (lower rank number = better).
 function trendHtml(cell) {
+  if (DAY_MODE === 'yesterday') return ''; // trend is a today-vs-yesterday concept
   const { base } = trendBase(cell);
   const cur = cell.position;
   if (base === undefined) return '<span class="tr new" title="перша перевірка">🆕</span>';
@@ -50,8 +77,9 @@ function trendHtml(cell) {
   return '<span class="tr flat" title="без змін">=</span>';
 }
 
-// Small "yesterday: #N" reference line under the pill.
+// Small "yesterday: #N" reference line under the pill (today mode only).
 function prevLine(cell) {
+  if (DAY_MODE === 'yesterday') return '';
   const y = cell.yesterdayPosition;
   if (y === undefined) return '<div class="prev">вчора: —</div>';
   return `<div class="prev">вчора: ${y == null ? 'OUT' : '#' + y}</div>`;
@@ -75,13 +103,18 @@ let sortDir = 1;
 // AND nothing pending; 'pending' = still waiting on some keyword; 'unknown' =
 // only errors so far.
 function siteStatus(keywords) {
-  const checked = keywords.filter((k) => !k.pending);
-  const nonErr = checked.filter((k) => !k.error);
+  const checked = keywords.filter((k) => !dispPending(k));
+  const nonErr = checked.filter((k) => DAY_MODE === 'today' ? !k.error : true);
   if (!checked.length) return 'pending';
-  if (nonErr.some((k) => k.position != null && k.position <= 5)) return 'in';
-  if (keywords.some((k) => k.pending)) return 'pending';
+  if (nonErr.some((k) => dispPos(k) != null && dispPos(k) <= 5)) return 'in';
+  if (keywords.some((k) => dispPending(k))) return 'pending';
   if (!nonErr.length) return 'unknown';
   return 'out';
+}
+
+// Site status for the ACTIVE day mode (recomputed each render).
+function rowStatus(row) {
+  return siteStatus(row.keywords);
 }
 
 // Build the pivot: ONE row per site (domain+geo), a column per keyword. Seeded
@@ -125,6 +158,7 @@ function buildRows(lastChecks, sweepTargets, historyAll) {
     g.kw.set(c.keyword, {
       keyword: c.keyword,
       position: c.position,
+      yPos: positionAround(hist[key] || [], DAY_MS), // position ~24h ago
       error: c.error || null,
       top1: c.top1 || null,
       checkedAt: c.checkedAt || '',
@@ -142,7 +176,6 @@ function buildRows(lastChecks, sweepTargets, historyAll) {
     g.keywords = g.order.map((k) => g.kw.get(k));
     delete g.kw;
     delete g.order;
-    g.status = siteStatus(g.keywords);
     maxKw = Math.max(maxKw, g.keywords.length);
     rows.push(g);
   }
@@ -151,14 +184,14 @@ function buildRows(lastChecks, sweepTargets, historyAll) {
 }
 
 function bestPos(row) {
-  // Best (lowest) numeric position across a row's keywords, for sorting.
-  const nums = row.keywords.map((c) => c.position).filter((p) => typeof p === 'number');
+  // Best (lowest) displayed position across a row's keywords, for sorting.
+  const nums = row.keywords.map((c) => dispPos(c)).filter((p) => typeof p === 'number');
   return nums.length ? Math.min(...nums) : Infinity;
 }
 
 function rowIsBad(row) {
-  // "Problematic" = the SITE is out of top-5 by ALL its keywords.
-  return row.status === 'out';
+  // "Problematic" = the SITE is out of top-5 by ALL its keywords (active mode).
+  return rowStatus(row) === 'out';
 }
 
 function applyView() {
@@ -196,8 +229,19 @@ function applyView() {
 
   renderHead();
   renderBody(view);
-  const shownChecks = view.reduce((n, r) => n + r.keywords.filter((c) => !c.pending).length, 0);
-  $('sub').textContent = `${view.length} з ${ROWS.length} сайтів · показано ${shownChecks} перевірок`;
+  const shownChecks = view.reduce((n, r) => n + r.keywords.filter((c) => !dispPending(c)).length, 0);
+  const modePrefix = DAY_MODE === 'yesterday' ? '📅 ВЧОРА (позиції ~добу тому) · ' : '';
+  $('sub').textContent = `${modePrefix}${view.length} з ${ROWS.length} сайтів · показано ${shownChecks} перевірок`;
+}
+
+function setDay(mode) {
+  DAY_MODE = mode === 'yesterday' ? 'yesterday' : 'today';
+  const t = $('day-today');
+  const y = $('day-yest');
+  if (t) t.classList.toggle('active', DAY_MODE === 'today');
+  if (y) y.classList.toggle('active', DAY_MODE === 'yesterday');
+  renderCards();
+  applyView();
 }
 
 function statusPill(status) {
@@ -247,21 +291,22 @@ function renderBody(view) {
         let inner;
         if (!c) {
           inner = '<span class="pill p-none">—</span>';
-        } else if (c.pending) {
+        } else if (dispPending(c)) {
+          const note = DAY_MODE === 'yesterday' ? 'нема даних' : 'очікує';
           inner =
             `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
-            `<span class="pill p-none">—</span><div class="prev">очікує</div>`;
+            `<span class="pill p-none">—</span><div class="prev">${note}</div>`;
         } else {
           inner =
             `<div class="kw" title="${c.keyword}">${c.keyword}</div>` +
-            `<div class="poscell"${histTitle(c)}>${pill(c)}${trendHtml(c)}</div>` +
+            `<div class="poscell"${DAY_MODE === 'today' ? histTitle(c) : ''}>${pill(c)}${trendHtml(c)}</div>` +
             prevLine(c);
         }
         kwCells.push(`<td class="kwcell">${inner}</td>`);
       }
       return (
         '<tr>' +
-        `<td class="site">${r.site}<div>${statusPill(r.status)}</div></td>` +
+        `<td class="site">${r.site}<div>${statusPill(rowStatus(r))}</div></td>` +
         `<td class="domain">${r.domain}</td>` +
         `<td class="geo">${r.geo}</td>` +
         kwCells.join('') +
@@ -273,12 +318,12 @@ function renderBody(view) {
 }
 
 function renderCards() {
-  const cells = ROWS.flatMap((r) => r.keywords).filter((c) => !c.pending);
+  const cells = ROWS.flatMap((r) => r.keywords).filter((c) => !dispPending(c));
   const total = cells.length;
-  const top5 = cells.filter((c) => typeof c.position === 'number' && c.position <= 5).length;
-  const err = cells.filter((c) => c.error).length;
-  const sitesOut = ROWS.filter((r) => r.status === 'out').length; // key metric = alertable
-  const sitesIn = ROWS.filter((r) => r.status === 'in').length;
+  const top5 = cells.filter((c) => typeof dispPos(c) === 'number' && dispPos(c) <= 5).length;
+  const err = DAY_MODE === 'today' ? cells.filter((c) => c.error).length : 0;
+  const sitesOut = ROWS.filter((r) => rowStatus(r) === 'out').length; // key metric = alertable
+  const sitesIn = ROWS.filter((r) => rowStatus(r) === 'in').length;
   const cards = [
     { n: ROWS.length, l: 'Сайтів' },
     { n: sitesIn, l: 'Сайтів у топі' },
@@ -377,15 +422,24 @@ $('csv').addEventListener('click', () => {
 function load() {
   chrome.storage.local.get(['lastChecks', 'sweepTargets', 'history'], (v) => {
     ROWS = buildRows(v.lastChecks || {}, v.sweepTargets || [], v.history || {});
-    renderCards();
     populateGeo();
-    applyView();
+    setDay(DAY_MODE); // renders cards + view in the active mode
   });
+}
+
+// Initial mode from ?day=yesterday
+try {
+  const p = new URLSearchParams(location.search).get('day');
+  if (p === 'yesterday' || p === 'y') DAY_MODE = 'yesterday';
+} catch {
+  /* ignore */
 }
 
 $('q').addEventListener('input', applyView);
 $('geo').addEventListener('change', applyView);
 $('onlybad').addEventListener('change', applyView);
 $('refresh').addEventListener('click', load);
+if ($('day-today')) $('day-today').addEventListener('click', () => setDay('today'));
+if ($('day-yest')) $('day-yest').addEventListener('click', () => setDay('yesterday'));
 
 load();

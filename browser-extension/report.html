@@ -231,6 +231,26 @@
     text-align: center;
     color: var(--muted);
   }
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg-btn {
+    border: 0;
+    border-radius: 0;
+    background: var(--card);
+    color: var(--muted);
+    padding: 8px 14px;
+    cursor: pointer;
+    font: 13px system-ui, sans-serif;
+  }
+  .seg-btn.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
 </style>
 
 <h1>🔎 Rank Peek — звіт по позиціях</h1>
@@ -239,6 +259,10 @@
 <div class="cards" id="cards"></div>
 
 <div class="toolbar">
+  <div class="seg">
+    <button id="day-today" class="seg-btn active">Сьогодні</button>
+    <button id="day-yest" class="seg-btn">📅 Вчора</button>
+  </div>
   <input id="q" type="search" placeholder="Пошук: сайт, домен, гео, кейворд…" />
   <select id="geo"><option value="">Усі гео</option></select>
   <label class="chk"><input id="onlybad" type="checkbox" /> Тільки проблемні (нижче топ-5 / OUT)</label>
