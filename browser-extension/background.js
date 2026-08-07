@@ -61,6 +61,27 @@ const NOISE = [
 ];
 const isNoise = (host) => NOISE.some((n) => matchHost(host, n));
 const isOwn = (host, ownDomains) => (ownDomains || []).some((d) => matchHost(host, d));
+
+// Drop detection (mirror of drops.js). A normal casino result carries a gambling
+// word; a domain with NONE — that isn't yours and isn't a mainstream aggregator —
+// is a "drop": a repurposed / expired domain pushed into Google. Unambiguous
+// stems match as plain substrings…
+const GAMBLING = [
+  'casino', 'casin', 'kasino', 'kazino', 'cazino', 'kasyno', 'slot', 'gambl',
+  'poker', 'roulette', 'ruleta', 'roleta', 'jackpot', 'vegas', 'bonus',
+  'scommesse', 'apuest', 'aposta', 'bookmaker', 'betting', 'wager', 'spela',
+];
+// …while short, very common stems match ONLY when isolated by a non-letter, so
+// x3bet / 22bet count but baldwin / sherbet / winter / potluck do not (those stay
+// flagged as drops — a missed drop is the worst error here).
+const GAMBLING_BOUNDED = /(^|[^a-z])(bet|win|spin|luck|stake)([^a-z]|$)/;
+const isGambling = (host) => {
+  const h = registrable(host);
+  return Boolean(h) && (GAMBLING.some((t) => h.includes(t)) || GAMBLING_BOUNDED.test(h));
+};
+const isDrop = (host, ownDomains) =>
+  Boolean(registrable(host)) && !isOwn(host, ownDomains) && !isNoise(host) && !isGambling(host);
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Random jitter so gaps between queries never look mechanical (±35%).
@@ -293,6 +314,45 @@ async function maybeAlertSite(s, result) {
     msg = `🟢 <b>${site.site}</b> · ${site.geo}\nЗнову в топ-${maxPos}: ${bestTxt}\n🕒 ${result.collectedAt}`;
   }
   if (msg) await sendTelegram(s.telegramToken, s.telegramChatId, msg);
+}
+
+// Per-QUERY drop alert: notify when a NEW drop domain appears in the top-10 of
+// one of your ACTIVE brands (the dropWatch list you manage on the Drops tab).
+// Only fires for active brands; a drop that persists across runs is not
+// re-alerted (only its first appearance). Empty active list = no drop alerts.
+async function maybeAlertDrops(s, result) {
+  if (result.error) return;
+  if (!s.telegramToken || !s.telegramChatId) return;
+  const data = await chrome.storage.local.get(['dropWatch', 'dropsSeen', 'dropAlerts']);
+  if (data.dropAlerts === false) return; // toggle, default ON
+  const watch = Array.isArray(data.dropWatch) ? data.dropWatch : [];
+  if (!watch.length) return; // no active brands defined -> nothing to watch
+  if (!watch.some((d) => matchHost(result.domain, d))) return; // this brand isn't active
+
+  const ownDomains = (s.targets || []).map((t) => t.domain);
+  const currentDrops = (result.topResults || [])
+    .slice(0, 10)
+    .filter((x) => isDrop(x.host, ownDomains));
+  const currentHosts = currentDrops.map((x) => registrable(x.host));
+
+  const key = `${result.domain}|${result.keyword}|${result.gl}`;
+  const store = data.dropsSeen || {};
+  const prevSeen = Array.isArray(store[key]) ? store[key] : [];
+  store[key] = currentHosts; // remember for next run (so persisting drops don't re-alert)
+  await chrome.storage.local.set({ dropsSeen: store });
+
+  const fresh = currentDrops.filter((x) => !prevSeen.includes(registrable(x.host)));
+  if (!fresh.length) return;
+
+  const lines = fresh.map(
+    (x) => `#${x.position} ${registrable(x.host)}\n${x.url || 'https://' + registrable(x.host)}`,
+  );
+  const msg =
+    `🎯 <b>${result.site}</b> · ${result.geo || result.gl} · «${result.keyword}»\n` +
+    `Нові дропи в топ-10 (${fresh.length}):\n` +
+    lines.join('\n') +
+    `\n🕒 ${result.collectedAt}`;
+  await sendTelegramChunked(s.telegramToken, s.telegramChatId, msg);
 }
 
 // One day in ms — the window used for the "yesterday" comparison.
@@ -706,6 +766,7 @@ async function recordAndAdvance(result) {
 
   await updateLastCheck(result, (s.targets || []).map((t) => t.domain)); // persist first
   await maybeAlertSite(s, result); // per-SITE alert (out only if all keywords out)
+  await maybeAlertDrops(s, result); // per-QUERY drop alert (active brands only)
   try {
     await fetch(s.ingestUrl, {
       method: 'POST',

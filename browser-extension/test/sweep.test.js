@@ -577,6 +577,78 @@ async function main() {
     ok(env2.calls.tg.some((x) => x.includes('Проблемних нема')), '11.6 all-clear daily report');
   }
 
+  // ---------------------------------------------------------------------
+  section('12. Drop alerts: new drop in active brand top-10 -> Telegram, dedup, scope');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'MyBrand', domain: 'mybrand-casino.com', keyword: 'mybrand', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'Other', domain: 'other-casino.com', keyword: 'other', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.dropWatch = ['mybrand-casino.com']; // only MyBrand is "active"
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    env.store.digestEveryRun = false; // isolate: only drop alerts in the stream
+
+    const serpFor = (t) =>
+      t.domain === 'mybrand-casino.com'
+        ? serp([
+            { host: 'mybrand-casino.com' }, // you
+            { host: 'beachxbums.com' }, // DROP
+            { host: 'megaslots-casino.com' }, // competitor (gambling word)
+            { host: 'trustpilot.com' }, // aggregator (noise)
+            { host: 'hanami-sushi.it' }, // DROP
+          ])
+        : serp([
+            { host: 'other-casino.com' },
+            { host: 'santinavarro.com' }, // a drop, but this brand isn't active
+          ]);
+
+    // run1: two new drops on the active brand -> one alert listing both; none for Other
+    await runSweep(env, fire, serpFor);
+    let tg = env.calls.tg.slice();
+    const d1 = tg.filter((m) => m.includes('Нові дропи'));
+    ok(d1.length === 1, '12.1 exactly one drop alert (active brand only)', String(d1.length));
+    ok(d1[0] && d1[0].includes('beachxbums.com') && d1[0].includes('hanami-sushi.it'), '12.2 alert lists both new drops');
+    ok(d1[0] && !d1[0].includes('megaslots-casino.com') && !d1[0].includes('trustpilot.com'), '12.3 competitor + aggregator are NOT flagged as drops');
+    ok(!tg.some((m) => m.includes('santinavarro.com')), '12.4 a drop on a NON-active brand does not alert');
+
+    // run2: same drops -> no new alert (dedup on persisting drops)
+    env.calls.tg.length = 0;
+    await runSweep(env, fire, serpFor);
+    ok(!env.calls.tg.some((m) => m.includes('Нові дропи')), '12.5 persisting drops are not re-alerted');
+
+    // run3: a NEW drop appears -> alert only for the newly-appeared one
+    env.calls.tg.length = 0;
+    const serpFor2 = (t) =>
+      t.domain === 'mybrand-casino.com'
+        ? serp([
+            { host: 'mybrand-casino.com' },
+            { host: 'beachxbums.com' },
+            { host: 'hanami-sushi.it' },
+            { host: 'newdrop-bakery.org' }, // NEW drop
+          ])
+        : serp([{ host: 'other-casino.com' }]);
+    await runSweep(env, fire, serpFor2);
+    const d3 = env.calls.tg.slice().filter((m) => m.includes('Нові дропи'));
+    ok(d3.length === 1 && d3[0].includes('newdrop-bakery.org') && !d3[0].includes('beachxbums.com'), '12.6 only the newly-appeared drop is alerted');
+
+    // toggle OFF suppresses drop alerts
+    const env3 = makeEnv();
+    loadBackground(env3);
+    const fire3 = makeDriver(env3);
+    env3.store.sweepTargets = [{ site: 'MyBrand', domain: 'mybrand-casino.com', keyword: 'mybrand', gl: 'it', hl: 'it', geo: 'Italy' }];
+    env3.store.dropWatch = ['mybrand-casino.com'];
+    env3.store.telegramToken = 'TOK';
+    env3.store.telegramChatId = 'CHAT';
+    env3.store.digestEveryRun = false;
+    env3.store.dropAlerts = false; // OFF
+    await runSweep(env3, fire3, () => serp([{ host: 'mybrand-casino.com' }, { host: 'beachxbums.com' }]));
+    ok(!env3.calls.tg.some((m) => m.includes('Нові дропи')), '12.7 dropAlerts=false suppresses drop alerts');
+  }
+
   // done
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;
