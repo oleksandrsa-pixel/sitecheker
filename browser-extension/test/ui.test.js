@@ -429,11 +429,11 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('K. drops.js — full SERP, drop detection, confirmed list, copyable URLs');
+  section('K. drops.js — auto drop-detection, active-brand watchlist, copyable URLs');
   {
     const now = new Date().toISOString();
     const storage = makeStorage({
-      dropDomains: ['hanami-sushi.it'], // one confirmed drop the user pushed
+      dropWatch: ['zoccer-online-casino.com'], // only this brand is "active"
       lastChecks: {
         'zoccer-online-casino.com|zoccer|es': {
           site: 'Zoccer', keyword: 'zoccer', geo: 'Spain', gl: 'es', domain: 'zoccer-online-casino.com',
@@ -461,11 +461,10 @@ async function main() {
     await flush();
 
     const check = storage.store.lastChecks['zoccer-online-casino.com|zoccer|es'];
-    // buildSerp uses DROPS loaded from storage (['hanami-sushi.it'])
     const serp = ctx.buildSerp(check);
     ok(serp.find((x) => x.host === 'zoccer-online-casino.com').kind === 'you', 'K.1 own target classified as YOU');
-    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 off-topic domain -> heuristic DROP?');
-    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'dropknown', 'K.3 listed domain -> confirmed DROP');
+    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 off-topic .com auto-flagged as DROP');
+    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.3 off-topic .it auto-flagged as DROP (no manual list)');
     ok(serp.find((x) => x.host === 'trustpilot.com').kind === 'noise', 'K.4 aggregator classified as noise');
     ok(serp.find((x) => x.host === 'megaslots-casino.com').kind === 'comp', 'K.5 gambling domain -> competitor');
 
@@ -475,18 +474,22 @@ async function main() {
     // coincidental English substrings must NOT read as gambling (else a real drop is missed)
     ok(!ctx.isGambling('baldwinlaw.com') && !ctx.isGambling('sherbetcafe.fr') && !ctx.isGambling('winterdental.es') && !ctx.isGambling('potluckcatering.com') && !ctx.isGambling('betterhomes.com'), 'K.7b baldwin/sherbet/winter/potluck/better are NOT gambling (bounded short stems)');
 
-    // the confirmed list toggles the label
-    const noList = ctx.buildSerp(check, []);
-    ok(noList.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.8 without list, a real drop still caught by heuristic (DROP?)');
-    const listB = ctx.buildSerp(check, ['beachxbums.com']);
-    ok(listB.find((x) => x.host === 'beachxbums.com').kind === 'dropknown', 'K.9 explicit list marks a domain confirmed DROP');
+    // the active-brand watchlist scopes the view to only watched brands
+    const shown = ctx.view();
+    ok(shown.length === 1 && shown[0].domain === 'zoccer-online-casino.com', 'K.8 view() shows only the active (watched) brand, hides b.com');
+    ok(shown[0].drops === 2, 'K.8b watched brand reports 2 auto-detected drops (beachxbums + hanami-sushi)');
+
+    // watchlist parsing from a pasted list / CSV (domains only, headers skipped)
+    const parsed = ctx.parseWatchInput('GEO,Brand,Domain,keyword\nItaly,Betscore,https://betscore-1casino.com/it8-it8/,Betscore\nspinpolocasino.it');
+    ok(parsed.length === 2 && parsed.includes('betscore-1casino.com') && parsed.includes('spinpolocasino.it'), 'K.9 parseWatchInput extracts domains from CSV + bare lines, skips header');
 
     const csv = ctx.buildCsv();
     ok(csv.startsWith('﻿sep=,'), 'K.10 CSV starts with BOM + sep=, hint');
     ok(csv.includes('Тип') && csv.includes('Дроп?') && csv.includes('URL'), 'K.11 CSV has Тип + Дроп? + URL columns');
-    ok(csv.includes('ВАШ САЙТ') && csv.includes('ДРОП?') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.12 CSV labels every row type');
+    ok(csv.includes('ВАШ САЙТ') && csv.includes('ДРОП') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.12 CSV labels every row type');
     ok(/(^|,)так(,|$)/m.test(csv), 'K.13 drop rows flagged "так" in the Дроп? column');
     ok(csv.includes('https://zoccer-online-casino.com/es-es/'), 'K.14 full copyable URL present in export');
+    ok(!csv.includes('b.com'), 'K.15 CSV export scoped to the watchlist (b.com excluded)');
   }
 
   // ---------------------------------------------------------------------

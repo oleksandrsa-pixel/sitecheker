@@ -42,6 +42,9 @@
   }
   details.drops summary { cursor: pointer; font-weight: 600; color: var(--txt); outline: none; }
   details.drops .hint { color: var(--muted); font-size: 12px; margin: 8px 0 6px; }
+  details.drops input[type='file'] {
+    display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px;
+  }
   details.drops textarea {
     width: 100%; height: 92px; background: #0d1020; color: var(--txt);
     border: 1px solid var(--line); border-radius: 6px; padding: 8px;
@@ -64,6 +67,7 @@
     background: rgba(251, 146, 60, 0.14); border: 1px solid rgba(251,146,60,.4);
     padding: 1px 8px; border-radius: 999px;
   }
+  .dropcount.zero { color: var(--muted); background: transparent; border-color: var(--line); font-weight: 600; }
   .me { margin-left: auto; display: flex; align-items: center; gap: 6px; }
   .me .lbl { color: var(--muted); font-size: 12px; }
   .pill {
@@ -86,17 +90,11 @@
     border-color: rgba(52, 211, 153, 0.55);
     box-shadow: 0 0 0 1px rgba(52,211,153,.25), 0 0 14px rgba(52,211,153,.18);
   }
-  /* Confirmed drop — solid orange glow, the thing you're here to watch. */
+  /* Auto-detected drop — solid orange glow, the thing you're here to watch. */
   .srow.k-drop {
     background: rgba(251, 146, 60, 0.13);
     border-color: rgba(251, 146, 60, 0.7);
     box-shadow: 0 0 0 1px rgba(251,146,60,.3), 0 0 16px rgba(251,146,60,.22);
-  }
-  /* Heuristic drop candidate — softer, dashed orange. */
-  .srow.k-dropq {
-    background: rgba(251, 146, 60, 0.06);
-    border-color: rgba(251, 146, 60, 0.5);
-    border-style: dashed;
   }
   .rk {
     flex: 0 0 34px; text-align: right; color: var(--muted);
@@ -110,7 +108,6 @@
   .tag.k-you { background: var(--green); color: #06281c; }
   .tag.k-own { background: rgba(52,211,153,.18); color: var(--green); }
   .tag.k-drop { background: var(--orange); color: #241206; }
-  .tag.k-dropq { background: rgba(251,146,60,.18); color: var(--orange); }
   .tag.k-comp { background: rgba(248,113,113,.16); color: var(--red); }
   .tag.k-noise { background: #2a2f4a; color: var(--muted); }
   .meta { flex: 1 1 auto; min-width: 0; }
@@ -135,17 +132,19 @@
 <h1>🎯 Rank Peek — дропи</h1>
 <div class="sub" id="sub">—</div>
 
-<details class="drops">
-  <summary>🎯 Мої дроп-домени (підтверджені)</summary>
+<details class="drops" open>
+  <summary>🎯 Активні бренди (на які запускаєш дропи)</summary>
   <p class="hint">
-    Встав сюди домени, які <b>ти сам</b> заливаєш у Google (дроп-сайти) — по одному в рядок
-    або через кому. Вони підсвічуватимуться як <b>ДРОП</b> (яскраво). Решту схожих
-    (нетематичні домени без гемблінг-слів) розширення позначає само як <b>ДРОП?</b>.
+    Завантаж <b>CSV</b> із брендами, на які ти <b>зараз запускаєш дропи</b> (або встав домени —
+    по одному в рядок). Вкладка показуватиме <b>лише ці бренди</b> і <b>сама</b> підсвітить
+    дропи в їх топ-10 — вручну дропи вводити <b>не треба</b>. Ці ж домени мають бути у
+    загальному списку сайтів, щоб прогін збирав їх видачу. Порожній список = показати всі сайти.
   </p>
-  <textarea id="droplist" spellcheck="false" placeholder="beachxbums.com&#10;hanami-sushi.it&#10;syncopationdance.org"></textarea>
+  <input id="watchcsv" type="file" accept=".csv,text/csv" />
+  <textarea id="watchlist" spellcheck="false" placeholder="betscore-1casino.com&#10;spinpolocasino.it&#10;magneticslotcasino.com"></textarea>
   <div class="row-btns">
-    <button id="savedrops">Зберегти список</button>
-    <span id="dropmsg"></span>
+    <button id="savewatch">Зберегти бренди</button>
+    <span id="watchmsg"></span>
   </div>
 </details>
 
