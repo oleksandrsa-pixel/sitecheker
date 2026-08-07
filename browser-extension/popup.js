@@ -183,9 +183,10 @@ $('export').addEventListener('click', () => {
   });
 });
 
-// Competitors now live in their own structured page (competitors.html).
-$('comp').addEventListener('click', () =>
-  chrome.tabs.create({ url: chrome.runtime.getURL('competitors.html') }),
+// Drops now live in their own structured page (drops.html): the full top-10
+// SERP with your pushed / repurposed drop-domains highlighted.
+$('drops').addEventListener('click', () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL('drops.html') }),
 );
 
 function fmtTime(iso) {

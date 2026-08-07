@@ -1,23 +1,79 @@
-// Rank Peek — competitors page.
+// Rank Peek — drops page.
 //
-// For each tracked query shows the FULL top-10 SERP: YOUR site highlighted, and
-// every other result labeled (competitor / aggregator / your other site) with
-// its full, copyable URL — so you can grab a link and file an abuse report
-// without opening the page.
+// For each tracked query shows the FULL top-10 SERP and highlights the "drops":
+// repurposed / expired domains we push into Google to grab a position. They give
+// themselves away because they look nothing like the rest of a casino SERP —
+// random legit-business names (barber shop, sushi, pediatrics, dance studio…)
+// on any TLD (.com/.org/.it/.es/.pt/.fr/.gr).
+//
+// A result is flagged as a drop when its domain is NOT one of your own tracked
+// sites, NOT a mainstream aggregator, and contains NO gambling word — i.e. it is
+// the odd one out. Domains you list yourself (your known drops) are marked as
+// confirmed. Every row keeps its full, copyable URL.
 
 const $ = (id) => document.getElementById(id);
 
+// Mainstream platforms / authority sites — never a "drop", even though their
+// names carry no gambling word.
 const NOISE = [
   'wikipedia.org', 'trustpilot.com', 'google.com', 'apps.apple.com', 'youtube.com',
   'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'tiktok.com',
-  'linkedin.com', 'pinterest.com', 'tripadvisor.com',
+  'linkedin.com', 'pinterest.com', 'tripadvisor.com', 'yelp.com', 'quora.com',
+  'medium.com', 'github.com', 'apple.com', 'play.google.com', 'maps.google.com',
 ];
+
+// Gambling / betting word-stems. A normal casino SERP result almost always
+// carries one of these in its domain (your brands + real competitors + review
+// portals). A domain with NONE of them, that isn't yours and isn't a mainstream
+// site, is the tell-tale "drop". Tuned toward this niche's vocabulary — extend
+// freely. (Substring match, so it also catches winbeatz/spinpolo/luckystart…)
+const GAMBLING = [
+  'casino', 'kasino', 'kazino', 'cazino', 'kasyno', 'slot', 'gambl', 'poker',
+  'roulette', 'ruleta', 'roleta', 'jackpot', 'vegas', 'bet', 'win', 'spin',
+  'luck', 'bonus', 'stake', 'wager', 'scommesse', 'apuest', 'aposta', 'bookmaker',
+  'betting', 'wett', 'spela', 'casin',
+];
+
 const hostMatches = (host, base) => {
   const h = (host || '').replace(/^www\./, '').toLowerCase();
   const b = (base || '').replace(/^www\./, '').toLowerCase();
   return !!h && !!b && (h === b || h.endsWith('.' + b));
 };
 const isNoise = (host) => NOISE.some((n) => hostMatches(host, n));
+
+function isGambling(host) {
+  const h = (host || '').replace(/^www\./, '').toLowerCase();
+  return !!h && GAMBLING.some((t) => h.includes(t));
+}
+
+// Normalise anything the user pastes into the drop-list to a registrable host.
+function parseHost(value) {
+  const raw = (value || '').trim();
+  if (!raw) return '';
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    return new URL(withScheme).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+  }
+}
+
+function parseDropList(text) {
+  const out = [];
+  const seen = new Set();
+  for (const piece of String(text || '').split(/[\s,;]+/)) {
+    const h = parseHost(piece);
+    if (h && !seen.has(h)) {
+      seen.add(h);
+      out.push(h);
+    }
+  }
+  return out;
+}
+
+const inDropList = (host, drops) => (drops || []).some((d) => hostMatches(host, d));
+
+let DROPS = []; // user's confirmed drop domains (from the list below)
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -45,46 +101,69 @@ function myPill(c) {
 const KIND = {
   you: { cls: 'k-you', label: 'ВАШ САЙТ' },
   own: { cls: 'k-own', label: 'ваш сайт' },
+  dropknown: { cls: 'k-drop', label: 'ДРОП' },
+  drop: { cls: 'k-dropq', label: 'ДРОП?' },
   noise: { cls: 'k-noise', label: 'агрегатор' },
   comp: { cls: 'k-comp', label: 'конкурент' },
 };
+const isDropKind = (kind) => kind === 'drop' || kind === 'dropknown';
 
-// Build the classified SERP list for a target from its stored top-10 (falls
-// back to the old competitors field for checks recorded before v0.8).
-function buildSerp(c) {
+// Classify a single SERP row. Priority: your own target → your other tracked
+// site → a domain you listed as a known drop → mainstream aggregator → a normal
+// gambling result (competitor) → otherwise the odd-one-out heuristic drop.
+function classify(x, c, drops) {
+  if (hostMatches(x.host, c.domain)) return 'you';
+  if (x.own) return 'own';
+  if (inDropList(x.host, drops)) return 'dropknown';
+  if (isNoise(x.host)) return 'noise';
+  if (isGambling(x.host)) return 'comp';
+  return 'drop';
+}
+
+// Build the classified SERP list for a target from its stored top-10 (falls back
+// to the old competitors field for checks recorded before v0.8).
+function buildSerp(c, drops = DROPS) {
   const list =
     Array.isArray(c.serpTop) && c.serpTop.length
       ? c.serpTop
       : Array.isArray(c.competitors)
         ? c.competitors.map((x) => ({ ...x, own: false }))
         : [];
-  return list.map((x) => {
-    let kind;
-    if (hostMatches(x.host, c.domain)) kind = 'you';
-    else if (x.own) kind = 'own';
-    else if (isNoise(x.host)) kind = 'noise';
-    else kind = 'comp';
-    return { position: x.position, host: x.host, url: x.url || '', title: x.title || '', kind };
-  });
+  return list.map((x) => ({
+    position: x.position,
+    host: x.host,
+    url: x.url || '',
+    title: x.title || '',
+    kind: classify(x, c, drops),
+  }));
 }
+
+const dropCount = (serp) => serp.filter((x) => isDropKind(x.kind)).length;
 
 let ROWS = [];
 
 function load() {
-  chrome.storage.local.get(['lastChecks'], (v) => {
+  chrome.storage.local.get(['lastChecks', 'dropDomains'], (v) => {
+    DROPS = Array.isArray(v.dropDomains) ? v.dropDomains : [];
+    if ($('droplist')) $('droplist').value = DROPS.join('\n');
     ROWS = Object.values(v.lastChecks || {})
-      .map((c) => ({
-        site: c.site || c.domain,
-        keyword: c.keyword,
-        geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
-        gl: c.gl,
-        domain: c.domain,
-        position: c.position,
-        error: c.error || null,
-        checkedAt: c.checkedAt || '',
-        serp: buildSerp(c),
-      }))
+      .map((c) => {
+        const serp = buildSerp(c, DROPS);
+        return {
+          site: c.site || c.domain,
+          keyword: c.keyword,
+          geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
+          gl: c.gl,
+          domain: c.domain,
+          position: c.position,
+          error: c.error || null,
+          checkedAt: c.checkedAt || '',
+          serp,
+          drops: dropCount(serp),
+        };
+      })
       .sort((a, b) =>
+        (b.drops - a.drops) || // queries with drops float to the top
         (a.site || '').localeCompare(b.site || '') ||
         (a.geo || '').localeCompare(b.geo || '') ||
         (a.keyword || '').localeCompare(b.keyword || ''),
@@ -104,10 +183,10 @@ function populateGeo() {
 function view() {
   const q = $('q').value.trim().toLowerCase();
   const geo = $('geo').value;
-  const onlybad = $('onlybad').checked;
+  const onlydrops = $('onlydrops').checked;
   return ROWS.filter((r) => {
     if (geo && r.geo !== geo) return false;
-    if (onlybad && !(r.error || r.position == null || r.position > 5)) return false;
+    if (onlydrops && r.drops === 0) return false;
     if (!q) return true;
     const hay = [r.site, r.keyword, r.geo, ...r.serp.map((x) => x.host + ' ' + x.url)]
       .join(' ')
@@ -135,7 +214,10 @@ function serpRow(x) {
 
 function render() {
   const rows = view();
-  $('sub').textContent = `${rows.length} з ${ROWS.length} запитів · повний топ видачі з підсвіткою вашого сайту`;
+  const totalDrops = rows.reduce((n, r) => n + r.drops, 0);
+  $('sub').textContent =
+    `${rows.length} з ${ROWS.length} запитів · знайдено дропів у топ-10: ${totalDrops}` +
+    (DROPS.length ? ` · у списку підтверджених: ${DROPS.length}` : '');
   if (!ROWS.length) {
     $('list').innerHTML = '<div class="empty">Нема даних. Зроби прохід у розширенні (▶ Прохід), тоді онови цю сторінку.</div>';
     return;
@@ -149,12 +231,16 @@ function render() {
       const body = r.serp.length
         ? r.serp.map(serpRow).join('')
         : `<div class="none">${r.error ? 'Перевірка з помилкою (' + esc(r.error) + ')' : 'Видачі не зчитано'}</div>`;
+      const dropBadge = r.drops
+        ? `<span class="dropcount">🎯 дропів: ${r.drops}</span>`
+        : '';
       return (
         '<div class="card">' +
         '<div class="head">' +
         `<span class="brand">${esc(r.site)}</span>` +
         `<span class="kw">«${esc(r.keyword)}»</span>` +
         `<span class="geo">${esc(r.geo)}</span>` +
+        dropBadge +
         `<span class="me"><span class="lbl">моя позиція:</span> ${myPill(r)}` +
         (r.checkedAt ? ` <span class="badge">${fmtTime(r.checkedAt)}</span>` : '') +
         '</span>' +
@@ -201,6 +287,20 @@ function fallbackCopy(text, done) {
   ta.remove();
 }
 
+// ---- Confirmed drop-list (your own pushed domains) -------------------------
+
+function saveDropList() {
+  const drops = parseDropList($('droplist').value);
+  chrome.storage.local.set({ dropDomains: drops }, () => {
+    DROPS = drops;
+    $('droplist').value = drops.join('\n');
+    $('dropmsg').style.color = '#34d399';
+    $('dropmsg').textContent = `Збережено ✓ ${drops.length} домен(ів)`;
+    load();
+    setTimeout(() => ($('dropmsg').textContent = ''), 2500);
+  });
+}
+
 // ---- CSV export (full SERP, Excel-friendly) --------------------------------
 
 function csvEscape(v) {
@@ -215,17 +315,18 @@ function stamp() {
 }
 
 function buildCsv() {
-  const header = ['Мій сайт', 'Кейворд', 'Гео', 'Моя поз.', 'Дата/час', 'Позиція', 'Тип', 'Домен', 'Заголовок', 'URL'];
+  const header = ['Мій сайт', 'Кейворд', 'Гео', 'Моя поз.', 'Дата/час', 'Позиція', 'Тип', 'Дроп?', 'Домен', 'Заголовок', 'URL'];
   const lines = [header.map(csvEscape).join(',')];
   ROWS.forEach((r) => {
     const my = r.error ? 'ERR' : r.position == null ? 'OUT' : r.position;
     if (!r.serp.length) {
-      lines.push([r.site, r.keyword, r.geo, my, fmtTime(r.checkedAt), '', '', '', '(видачі не зчитано)', ''].map(csvEscape).join(','));
+      lines.push([r.site, r.keyword, r.geo, my, fmtTime(r.checkedAt), '', '', '', '', '(видачі не зчитано)', ''].map(csvEscape).join(','));
       return;
     }
     r.serp.forEach((x) => {
       const type = (KIND[x.kind] || KIND.comp).label;
-      lines.push([r.site, r.keyword, r.geo, my, fmtTime(r.checkedAt), x.position, type, x.host, x.title, x.url].map(csvEscape).join(','));
+      const drop = isDropKind(x.kind) ? 'так' : '';
+      lines.push([r.site, r.keyword, r.geo, my, fmtTime(r.checkedAt), x.position, type, drop, x.host, x.title, x.url].map(csvEscape).join(','));
     });
   });
   return `﻿sep=,\r\n${lines.join('\r\n')}`;
@@ -236,7 +337,7 @@ $('csv').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([buildCsv()], { type: 'text/csv;charset=utf-8' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `rank-peek-competitors-${stamp()}.csv`;
+  a.download = `rank-peek-drops-${stamp()}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -245,7 +346,8 @@ $('csv').addEventListener('click', () => {
 
 $('q').addEventListener('input', render);
 $('geo').addEventListener('change', render);
-$('onlybad').addEventListener('change', render);
+$('onlydrops').addEventListener('change', render);
 $('refresh').addEventListener('click', load);
+if ($('savedrops')) $('savedrops').addEventListener('click', saveDropList);
 
 load();
