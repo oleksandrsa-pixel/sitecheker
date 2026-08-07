@@ -289,6 +289,15 @@
     <input id="daily" type="checkbox" /> <b>Щоденний звіт</b> у Telegram о
     <input id="dailyhour" type="number" min="0" max="23" step="1" value="9" style="width: 52px" /> :00
   </label>
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="activesweep" type="checkbox" /> 🎯 <b>Окремий прогін активних брендів</b> кожні
+    <input id="activehours" type="number" min="1" max="24" step="1" value="2" style="width: 46px" /> год
+  </label>
+  <p class="hint" style="margin-left: 22px; margin-top: -2px">
+    Перевіряє <b>лише</b> бренди зі списку активних (вкладка «Дропи») частіше за основний
+    прохід — щоб швидше бачити нові дропи. Працює у режимі авто-проходу (не drip); домени
+    мають бути й у загальному списку сайтів. Більше запитів = вищий ризик 403, не став надто часто.
+  </p>
   <div class="row-btns">
     <button id="savetg">Зберегти + увімкнути</button>
     <button id="testtg" class="sec">Тест Telegram</button>

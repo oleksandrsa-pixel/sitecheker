@@ -649,6 +649,66 @@ async function main() {
     ok(!env3.calls.tg.some((m) => m.includes('Нові дропи')), '12.7 dropAlerts=false suppresses drop alerts');
   }
 
+  // ---------------------------------------------------------------------
+  section('13. Active-brand sweep: separate faster pass over only the dropWatch list');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'Act1', domain: 'act1-casino.com', keyword: 'act1', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'Act2', domain: 'act2-casino.com', keyword: 'act2', gl: 'es', hl: 'es', geo: 'Spain' },
+      { site: 'Big', domain: 'big-casino.com', keyword: 'big', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.dropWatch = ['act1-casino.com', 'act2-casino.com']; // 2 active brands
+    env.store.activeSweep = true;
+    env.store.activeSweepHours = 2;
+    env.store.stepDelaySec = 3;
+
+    // applySchedule (via rankpeek:schedule) arms the activeSweep alarm
+    await fire.message({ type: 'rankpeek:schedule' });
+    ok(!!env.alarms.activeSweep, '13.1 activeSweep alarm armed when the setting is on');
+
+    // firing it starts a sweep scoped to ONLY the active brands
+    await fire.alarm('activeSweep');
+    const swept = [];
+    let guard = 0;
+    while (env.store.sweep && env.store.sweep.running && guard < 200) {
+      guard += 1;
+      const s = env.store.sweep;
+      if (s.paused) break;
+      if (!s.current) {
+        if (env.alarms.next) { await fire.alarm('next'); continue; }
+        break;
+      }
+      const t = s.current.target;
+      swept.push(t.domain);
+      await fire.message(
+        { type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: serpWithTarget(t.domain, 1) } },
+        { tab: { id: s.current.tabId } },
+      );
+      if (env.alarms.next) await fire.alarm('next');
+    }
+    const uniq = [...new Set(swept)].sort();
+    ok(uniq.length === 2 && uniq[0] === 'act1-casino.com' && uniq[1] === 'act2-casino.com', '13.2 scoped sweep hits ONLY the 2 active brands (Big excluded)', JSON.stringify(uniq));
+    ok(env.store.sweep && env.store.sweep.scope === 'active', '13.3 sweep tagged scope=active');
+
+    // idle guard: activeSweep does NOT start when a sweep is already running
+    env.store.sweep = { running: true, scope: 'all', targets: [], index: 0, current: null };
+    const before = JSON.stringify(env.store.sweep);
+    await fire.alarm('activeSweep');
+    ok(JSON.stringify(env.store.sweep) === before, '13.4 activeSweep skipped while another sweep is running');
+
+    // empty active list -> the scoped sweep is a no-op (nothing to check)
+    const env2 = makeEnv();
+    loadBackground(env2);
+    const fire2 = makeDriver(env2);
+    env2.store.sweepTargets = [{ site: 'Big', domain: 'big-casino.com', keyword: 'big', gl: 'fr', hl: 'fr', geo: 'France' }];
+    env2.store.dropWatch = []; // none active
+    await fire2.alarm('activeSweep');
+    ok(!env2.store.sweep || !env2.store.sweep.running, '13.5 no active brands -> active sweep does not start');
+  }
+
   // done
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;

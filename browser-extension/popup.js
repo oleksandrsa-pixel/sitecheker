@@ -44,6 +44,8 @@ function loadConfig() {
       'quietEnd',
       'dailyReport',
       'dailyReportHour',
+      'activeSweep',
+      'activeSweepHours',
     ],
     (v) => {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
@@ -67,6 +69,8 @@ function loadConfig() {
       $('quietend').value = v.quietEnd != null ? v.quietEnd : 7;
       $('daily').checked = Boolean(v.dailyReport);
       $('dailyhour').value = v.dailyReportHour != null ? v.dailyReportHour : 9;
+      $('activesweep').checked = Boolean(v.activeSweep);
+      $('activehours').value = v.activeSweepHours != null ? v.activeSweepHours : 2;
     },
   );
 }
@@ -296,6 +300,8 @@ $('savetg').addEventListener('click', () => {
     quietEnd: Math.min(23, Math.max(0, Number($('quietend').value) || 0)),
     dailyReport: $('daily').checked,
     dailyReportHour: Math.min(23, Math.max(0, Number($('dailyhour').value) || 9)),
+    activeSweep: $('activesweep').checked,
+    activeSweepHours: Math.min(24, Math.max(1, Number($('activehours').value) || 2)),
   };
   chrome.storage.local.set(cfg, () => {
     chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm alarms / start drip
@@ -306,6 +312,7 @@ $('savetg').addEventListener('click', () => {
     else parts.push('авто-прохід вимкнено');
     if (cfg.quietEnabled) parts.push(`нічна пауза ${cfg.quietStart}-${cfg.quietEnd}`);
     if (cfg.dailyReport) parts.push(`звіт о ${cfg.dailyReportHour}:00`);
+    if (cfg.activeSweep) parts.push(`активні кожні ${cfg.activeSweepHours} год`);
     $('tgmsg').textContent = `Збережено ✓ · ${parts.join(' · ')}`;
     setTimeout(() => ($('tgmsg').textContent = ''), 3000);
   });

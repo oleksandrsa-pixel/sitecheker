@@ -28,6 +28,7 @@ const SOFT_FAIL_LIMIT = 2; // consecutive errors that look like a soft block
 const DEFAULT_DRIP_GAP_MIN = 4; // drip mode: minutes between queries (jittered ~3-5)
 const DRIP_MIN_GAP_MS = 60_000; // never faster than 1/min even if misconfigured
 const DEFAULT_DAILY_REPORT_HOUR = 9; // daily Telegram report time (local)
+const DEFAULT_ACTIVE_SWEEP_HOURS = 2; // separate faster pass over active brands
 const DEFAULT_QUIET_START = 23; // night pause start (local hour)
 const DEFAULT_QUIET_END = 7; // night pause end (local hour) -> ~16h active window
 
@@ -483,9 +484,12 @@ async function applySchedule() {
     'dripMode',
     'dailyReport',
     'dailyReportHour',
+    'activeSweep',
+    'activeSweepHours',
   ]);
   await chrome.alarms.clear('schedule');
   await chrome.alarms.clear('dailyReport');
+  await chrome.alarms.clear('activeSweep');
 
   if (v.dripMode) {
     // 24/7 continuous drip — make sure a sweep is running (it self-restarts on
@@ -506,6 +510,18 @@ async function applySchedule() {
     await chrome.alarms.create('dailyReport', {
       delayInMinutes: minutesUntilHour(hour),
       periodInMinutes: 1440,
+    });
+  }
+
+  // Separate, usually-faster pass over ONLY the active brands (dropWatch). Runs
+  // when the worker is idle between full sweeps. (In 24/7 drip mode a sweep is
+  // always running, so this is effectively a no-op — active brands are already
+  // covered each cycle.)
+  if (v.activeSweep) {
+    const ah = Math.max(0.5, Number(v.activeSweepHours) || DEFAULT_ACTIVE_SWEEP_HOURS);
+    await chrome.alarms.create('activeSweep', {
+      periodInMinutes: ah * 60,
+      delayInMinutes: ah * 60,
     });
   }
 }
@@ -570,29 +586,43 @@ chrome.runtime.onInstalled?.addListener(() => {
   applySchedule();
 });
 
-async function startSweep() {
+// scope='all' → sweep every target (the normal / manual / scheduled run).
+// scope='active' → sweep ONLY the active brands (dropWatch list): a one-shot
+// scoped burst on its own faster schedule, so those sites are checked more often
+// than the full list. Returns false if there's nothing to sweep for the scope.
+async function startSweep(scope = 'all') {
   const cfg = await getConfig();
   const c = await chrome.storage.local.get([
     'telegramToken',
     'telegramChatId',
     'alertMaxPos',
+    'dropWatch',
   ]);
+  let targets = cfg.targets;
+  let dripMode = cfg.dripMode;
+  if (scope === 'active') {
+    const watch = Array.isArray(c.dropWatch) ? c.dropWatch : [];
+    targets = (cfg.targets || []).filter((t) => watch.some((d) => matchHost(t.domain, d)));
+    if (!targets.length) return false; // no active brands configured — nothing to do
+    dripMode = false; // scoped active pass is a one-shot burst, never a 24/7 drip
+  }
   await setSweep({
     running: true,
     paused: false,
     blocked: false,
     quietPaused: false,
+    scope,
     index: 0,
     sinceBreak: 0,
     consecutiveErrors: 0,
     // Randomize order each pass so the query sequence isn't a fixed signature.
-    targets: shuffle(cfg.targets),
+    targets: shuffle(targets),
     ingestUrl: cfg.ingestUrl,
     stepDelayMs: cfg.stepDelayMs,
     batchSize: cfg.batchSize,
     batchPauseMs: cfg.batchPauseMs,
     cooldownMs: cfg.cooldownMs,
-    dripMode: cfg.dripMode,
+    dripMode,
     dripGapMs: cfg.dripGapMs,
     quietEnabled: cfg.quietEnabled,
     quietStart: cfg.quietStart,
@@ -605,6 +635,7 @@ async function startSweep() {
     startedAt: Date.now(),
   });
   await step();
+  return true;
 }
 
 async function stopSweep() {
@@ -643,16 +674,21 @@ async function step() {
     s.current = null;
     await setSweep(s);
     const hits = s.results.filter((r) => r.position != null).length;
-    try {
-      await chrome.notifications.create({
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icon.png'),
-        title: 'Rank Peek — прохід завершено',
-        message: `${s.results.length} перевірок, ${hits} у топ-10`,
-      });
-    } catch {
-      /* notifications optional */
+    if (s.scope !== 'active') {
+      try {
+        await chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icon.png'),
+          title: 'Rank Peek — прохід завершено',
+          message: `${s.results.length} перевірок, ${hits} у топ-10`,
+        });
+      } catch {
+        /* notifications optional */
+      }
     }
+    // Scoped active-brand pass: one-shot burst — never self-restart as a drip and
+    // skip the full out-of-top digest (drop alerts already fired per query).
+    if (s.scope === 'active') return;
     // In 24/7 drip mode keep cycling forever; the daily-report alarm handles
     // the summary, so we skip the per-cycle digest here.
     const drip = (await chrome.storage.local.get('dripMode')).dripMode;
@@ -882,6 +918,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'schedule') {
     const s = await getSweep();
     if (!s || !s.running) await startSweep(); // scheduled run (skip if one is active)
+  } else if (alarm.name === 'activeSweep') {
+    // Faster scoped pass over just the active brands — only when idle, so it
+    // never collides with (or interrupts) a full sweep.
+    const s = await getSweep();
+    if (!s || !s.running) await startSweep('active');
   } else if (alarm.name === 'dailyReport') {
     await sendDailyDigest();
   } else if (alarm.name === 'next') {
