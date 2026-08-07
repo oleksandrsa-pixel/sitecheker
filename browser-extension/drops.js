@@ -51,6 +51,17 @@ function isGambling(host) {
   return GAMBLING.some((t) => h.includes(t)) || GAMBLING_BOUNDED.test(h);
 }
 
+// The tell-tale marker drops put in their SERP <title> — e.g.
+// "Vipsta Sitio Oficial ᐉ Vipsta Acceso". This ᐉ (U+1409) is the PRECISE drop
+// signal: a top-10 result whose title carries it is a drop, so ads / reviews /
+// random competitor sites are no longer mistaken for drops. Extendable list —
+// add a glyph here if you spot drops using a different one.
+const DROP_MARKERS = ['ᐉ']; // ᐉ CANADIAN SYLLABICS PWO
+function hasMarker(title) {
+  const t = String(title || '');
+  return DROP_MARKERS.some((m) => t.includes(m));
+}
+
 // ---- Active-brand watchlist (the only thing you maintain) -------------------
 
 let WATCH = []; // registrable domains of brands you're currently launching
@@ -145,20 +156,22 @@ const KIND = {
   you: { cls: 'k-you', label: 'ВАШ САЙТ' },
   own: { cls: 'k-own', label: 'ваш сайт' },
   drop: { cls: 'k-drop', label: 'ДРОП' },
-  noise: { cls: 'k-noise', label: 'агрегатор' },
   comp: { cls: 'k-comp', label: 'конкурент' },
+  noise: { cls: 'k-noise', label: 'агрегатор' },
+  other: { cls: 'k-other', label: 'інше' },
 };
 const isDropKind = (kind) => kind === 'drop';
 
 // Classify a SERP row. Priority: your own target → your other tracked site →
-// mainstream aggregator → a normal gambling result (competitor) → otherwise the
-// odd-one-out heuristic drop.
+// a DROP (title carries the ᐉ marker) → mainstream aggregator → a gambling
+// result (competitor casino) → otherwise just another site (ad / review / etc.).
 function classify(x, c) {
   if (hostMatches(x.host, c.domain)) return 'you';
   if (x.own) return 'own';
+  if (hasMarker(x.title)) return 'drop'; // ᐉ marker — the precise drop signal
   if (isNoise(x.host)) return 'noise';
   if (isGambling(x.host)) return 'comp';
-  return 'drop';
+  return 'other';
 }
 
 function buildSerp(c) {

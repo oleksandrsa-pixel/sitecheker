@@ -110,6 +110,7 @@
   .tag.k-drop { background: var(--orange); color: #241206; }
   .tag.k-comp { background: rgba(248,113,113,.16); color: var(--red); }
   .tag.k-noise { background: #2a2f4a; color: var(--muted); }
+  .tag.k-other { background: #232739; color: #6b7280; }
   .meta { flex: 1 1 auto; min-width: 0; }
   .host { font-weight: 600; font-size: 13px; }
   .host .ttl { font-weight: 400; color: var(--muted); }
@@ -137,8 +138,10 @@
   <p class="hint">
     Завантаж <b>CSV</b> із брендами, на які ти <b>зараз запускаєш дропи</b> (або встав домени —
     по одному в рядок). Вкладка показуватиме <b>лише ці бренди</b> і <b>сама</b> підсвітить
-    дропи в їх топ-10 — вручну дропи вводити <b>не треба</b>. Ці ж домени мають бути у
-    загальному списку сайтів, щоб прогін збирав їх видачу. Порожній список = показати всі сайти.
+    дропи в їх топ-10 — вручну дропи вводити <b>не треба</b>. Дроп визначається <b>точно</b>
+    за характерним символом <b>ᐉ</b> у заголовку сторінки (напр. «Vipsta Sitio Oficial ᐉ Vipsta
+    Acceso») — тож реклама/огляди/конкуренти більше не потрапляють у дропи. Ці ж домени мають
+    бути у загальному списку сайтів, щоб прогін збирав їх видачу. Порожній список = показати всі сайти.
   </p>
   <input id="watchcsv" type="file" accept=".csv,text/csv" />
   <textarea id="watchlist" spellcheck="false" placeholder="betscore-1casino.com&#10;spinpolocasino.it&#10;magneticslotcasino.com"></textarea>

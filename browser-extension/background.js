@@ -63,25 +63,17 @@ const NOISE = [
 const isNoise = (host) => NOISE.some((n) => matchHost(host, n));
 const isOwn = (host, ownDomains) => (ownDomains || []).some((d) => matchHost(host, d));
 
-// Drop detection (mirror of drops.js). A normal casino result carries a gambling
-// word; a domain with NONE — that isn't yours and isn't a mainstream aggregator —
-// is a "drop": a repurposed / expired domain pushed into Google. Unambiguous
-// stems match as plain substrings…
-const GAMBLING = [
-  'casino', 'casin', 'kasino', 'kazino', 'cazino', 'kasyno', 'slot', 'gambl',
-  'poker', 'roulette', 'ruleta', 'roleta', 'jackpot', 'vegas', 'bonus',
-  'scommesse', 'apuest', 'aposta', 'bookmaker', 'betting', 'wager', 'spela',
-];
-// …while short, very common stems match ONLY when isolated by a non-letter, so
-// x3bet / 22bet count but baldwin / sherbet / winter / potluck do not (those stay
-// flagged as drops — a missed drop is the worst error here).
-const GAMBLING_BOUNDED = /(^|[^a-z])(bet|win|spin|luck|stake)([^a-z]|$)/;
-const isGambling = (host) => {
-  const h = registrable(host);
-  return Boolean(h) && (GAMBLING.some((t) => h.includes(t)) || GAMBLING_BOUNDED.test(h));
+// Drop detection (mirror of drops.js): a top-10 result is a drop when its SERP
+// <title> carries the tell-tale ᐉ marker (U+1409) — e.g. "Vipsta Sitio Oficial
+// ᐉ Vipsta Acceso" — and it isn't one of your own tracked sites. Precise signal,
+// so ads / reviews / competitor sites are not mistaken for drops. Extendable.
+const DROP_MARKERS = ['ᐉ']; // ᐉ CANADIAN SYLLABICS PWO
+const hasMarker = (title) => {
+  const t = String(title || '');
+  return DROP_MARKERS.some((m) => t.includes(m));
 };
-const isDrop = (host, ownDomains) =>
-  Boolean(registrable(host)) && !isOwn(host, ownDomains) && !isNoise(host) && !isGambling(host);
+const isDrop = (entry, ownDomains) =>
+  hasMarker(entry && entry.title) && !isOwn(entry && entry.host, ownDomains);
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -333,7 +325,7 @@ async function maybeAlertDrops(s, result) {
   const ownDomains = (s.targets || []).map((t) => t.domain);
   const currentDrops = (result.topResults || [])
     .slice(0, 10)
-    .filter((x) => isDrop(x.host, ownDomains));
+    .filter((x) => isDrop(x, ownDomains));
   const currentHosts = currentDrops.map((x) => registrable(x.host));
 
   const key = `${result.domain}|${result.keyword}|${result.gl}`;

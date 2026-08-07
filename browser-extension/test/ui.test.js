@@ -429,7 +429,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('K. drops.js — auto drop-detection, active-brand watchlist, copyable URLs');
+  section('K. drops.js — ᐉ-marker drop detection, active-brand watchlist, copyable URLs');
   {
     const now = new Date().toISOString();
     const storage = makeStorage({
@@ -439,11 +439,12 @@ async function main() {
           site: 'Zoccer', keyword: 'zoccer', geo: 'Spain', gl: 'es', domain: 'zoccer-online-casino.com',
           position: 2, error: null, checkedAt: now,
           serpTop: [
-            { position: 1, host: 'beachxbums.com', url: 'https://beachxbums.com/x', title: 'BB', own: false },
-            { position: 2, host: 'zoccer-online-casino.com', url: 'https://zoccer-online-casino.com/es-es/', title: 'Me', own: true },
-            { position: 3, host: 'trustpilot.com', url: 'https://trustpilot.com/review/zoccer', title: 'TP', own: false },
-            { position: 4, host: 'megaslots-casino.com', url: 'https://megaslots-casino.com/', title: 'MS', own: false },
-            { position: 5, host: 'hanami-sushi.it', url: 'https://hanami-sushi.it/', title: 'HS', own: false },
+            { position: 1, host: 'beachxbums.com', url: 'https://beachxbums.com/x', title: 'Zoccer Sitio Oficial ᐉ Zoccer Acceso', own: false }, // DROP (ᐉ marker)
+            { position: 2, host: 'zoccer-online-casino.com', url: 'https://zoccer-online-casino.com/es-es/', title: 'Zoccer', own: true }, // you
+            { position: 3, host: 'trustpilot.com', url: 'https://trustpilot.com/review/zoccer', title: 'Reviews', own: false }, // noise
+            { position: 4, host: 'megaslots-casino.com', url: 'https://megaslots-casino.com/', title: 'MegaSlots', own: false }, // comp
+            { position: 5, host: 'hanami-sushi.it', url: 'https://hanami-sushi.it/', title: 'Zoccer ᐉ Bonus', own: false }, // DROP (ᐉ marker)
+            { position: 6, host: 'someblog-review.com', url: 'https://someblog-review.com/', title: 'Top 10 casinos review', own: false }, // other (off-topic, NO marker)
           ],
         },
         'b.com|b|fr': { site: 'B', keyword: 'b', geo: 'France', gl: 'fr', domain: 'b.com', position: null, error: null, checkedAt: now, serpTop: [] },
@@ -463,33 +464,32 @@ async function main() {
     const check = storage.store.lastChecks['zoccer-online-casino.com|zoccer|es'];
     const serp = ctx.buildSerp(check);
     ok(serp.find((x) => x.host === 'zoccer-online-casino.com').kind === 'you', 'K.1 own target classified as YOU');
-    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 off-topic .com auto-flagged as DROP');
-    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.3 off-topic .it auto-flagged as DROP (no manual list)');
-    ok(serp.find((x) => x.host === 'trustpilot.com').kind === 'noise', 'K.4 aggregator classified as noise');
-    ok(serp.find((x) => x.host === 'megaslots-casino.com').kind === 'comp', 'K.5 gambling domain -> competitor');
+    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 title with ᐉ marker -> DROP');
+    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.3 second ᐉ-marked title -> DROP');
+    ok(serp.find((x) => x.host === 'someblog-review.com').kind === 'other', 'K.4 off-topic site WITHOUT the marker -> other (NOT a drop)');
+    ok(serp.find((x) => x.host === 'trustpilot.com').kind === 'noise', 'K.5 aggregator classified as noise');
+    ok(serp.find((x) => x.host === 'megaslots-casino.com').kind === 'comp', 'K.6 gambling domain -> competitor');
 
-    // gambling-word detector (the core of the heuristic)
-    ok(ctx.isGambling('winbeatz-casino1.com') && ctx.isGambling('megaslots-casino.com') && ctx.isGambling('spinpolocasino.it') && ctx.isGambling('x3bet.es') && ctx.isGambling('22bet-online1.com'), 'K.6 gambling detected (incl. digit-adjacent x3bet/22bet)');
-    ok(!ctx.isGambling('beachxbums.com') && !ctx.isGambling('hanami-sushi.it') && !ctx.isGambling('santinavarro.com') && !ctx.isGambling('settegradinord.it'), 'K.7 off-topic drop domains are NOT gambling');
-    // coincidental English substrings must NOT read as gambling (else a real drop is missed)
-    ok(!ctx.isGambling('baldwinlaw.com') && !ctx.isGambling('sherbetcafe.fr') && !ctx.isGambling('winterdental.es') && !ctx.isGambling('potluckcatering.com') && !ctx.isGambling('betterhomes.com'), 'K.7b baldwin/sherbet/winter/potluck/better are NOT gambling (bounded short stems)');
+    // marker detector — the precise drop signal (ᐉ in the SERP title)
+    ok(ctx.hasMarker('Vipsta Sitio Oficial ᐉ Vipsta Acceso'), 'K.7 hasMarker detects the ᐉ marker');
+    ok(!ctx.hasMarker('Plain casino review, no marker'), 'K.7b hasMarker is false without the marker');
 
     // the active-brand watchlist scopes the view to only watched brands
     const shown = ctx.view();
     ok(shown.length === 1 && shown[0].domain === 'zoccer-online-casino.com', 'K.8 view() shows only the active (watched) brand, hides b.com');
-    ok(shown[0].drops === 2, 'K.8b watched brand reports 2 auto-detected drops (beachxbums + hanami-sushi)');
+    ok(shown[0].drops === 2, 'K.9 watched brand reports exactly the 2 ᐉ-marked drops (review/competitor/aggregator excluded)');
 
     // watchlist parsing from a pasted list / CSV (domains only, headers skipped)
     const parsed = ctx.parseWatchInput('GEO,Brand,Domain,keyword\nItaly,Betscore,https://betscore-1casino.com/it8-it8/,Betscore\nspinpolocasino.it');
-    ok(parsed.length === 2 && parsed.includes('betscore-1casino.com') && parsed.includes('spinpolocasino.it'), 'K.9 parseWatchInput extracts domains from CSV + bare lines, skips header');
+    ok(parsed.length === 2 && parsed.includes('betscore-1casino.com') && parsed.includes('spinpolocasino.it'), 'K.10 parseWatchInput extracts domains from CSV + bare lines, skips header');
 
     const csv = ctx.buildCsv();
-    ok(csv.startsWith('﻿sep=,'), 'K.10 CSV starts with BOM + sep=, hint');
-    ok(csv.includes('Тип') && csv.includes('Дроп?') && csv.includes('URL'), 'K.11 CSV has Тип + Дроп? + URL columns');
-    ok(csv.includes('ВАШ САЙТ') && csv.includes('ДРОП') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.12 CSV labels every row type');
-    ok(/(^|,)так(,|$)/m.test(csv), 'K.13 drop rows flagged "так" in the Дроп? column');
-    ok(csv.includes('https://zoccer-online-casino.com/es-es/'), 'K.14 full copyable URL present in export');
-    ok(!csv.includes('b.com'), 'K.15 CSV export scoped to the watchlist (b.com excluded)');
+    ok(csv.startsWith('﻿sep=,'), 'K.11 CSV starts with BOM + sep=, hint');
+    ok(csv.includes('Тип') && csv.includes('Дроп?') && csv.includes('URL'), 'K.12 CSV has Тип + Дроп? + URL columns');
+    ok(csv.includes('ВАШ САЙТ') && csv.includes('ДРОП') && csv.includes('конкурент') && csv.includes('агрегатор'), 'K.13 CSV labels every row type');
+    ok(/(^|,)так(,|$)/m.test(csv), 'K.14 drop rows flagged "так" in the Дроп? column');
+    ok(csv.includes('https://zoccer-online-casino.com/es-es/'), 'K.15 full copyable URL present in export');
+    ok(!csv.includes('b.com'), 'K.16 CSV export scoped to the watchlist (b.com excluded)');
   }
 
   // ---------------------------------------------------------------------

@@ -592,18 +592,21 @@ async function main() {
     env.store.telegramChatId = 'CHAT';
     env.store.digestEveryRun = false; // isolate: only drop alerts in the stream
 
+    // Drops are identified by the ᐉ marker (U+1409) in the SERP title.
+    const withTitles = (arr) =>
+      arr.map((x, i) => ({ host: x.host, position: i + 1, url: `https://${x.host}/`, title: x.title || x.host }));
     const serpFor = (t) =>
       t.domain === 'mybrand-casino.com'
-        ? serp([
-            { host: 'mybrand-casino.com' }, // you
-            { host: 'beachxbums.com' }, // DROP
-            { host: 'megaslots-casino.com' }, // competitor (gambling word)
-            { host: 'trustpilot.com' }, // aggregator (noise)
-            { host: 'hanami-sushi.it' }, // DROP
+        ? withTitles([
+            { host: 'mybrand-casino.com', title: 'MyBrand Casino' }, // you
+            { host: 'beachxbums.com', title: 'MyBrand Sitio Oficial ᐉ MyBrand Acceso' }, // DROP (marker)
+            { host: 'megaslots-casino.com', title: 'MegaSlots real casino' }, // competitor, NO marker
+            { host: 'trustpilot.com', title: 'Reviews' }, // aggregator, NO marker
+            { host: 'hanami-sushi.it', title: 'MyBrand ᐉ Bonus' }, // DROP (marker)
           ])
-        : serp([
-            { host: 'other-casino.com' },
-            { host: 'santinavarro.com' }, // a drop, but this brand isn't active
+        : withTitles([
+            { host: 'other-casino.com', title: 'Other' },
+            { host: 'santinavarro.com', title: 'MyBrand ᐉ Acceso' }, // marker, but this brand isn't active
           ]);
 
     // run1: two new drops on the active brand -> one alert listing both; none for Other
@@ -624,13 +627,13 @@ async function main() {
     env.calls.tg.length = 0;
     const serpFor2 = (t) =>
       t.domain === 'mybrand-casino.com'
-        ? serp([
-            { host: 'mybrand-casino.com' },
-            { host: 'beachxbums.com' },
-            { host: 'hanami-sushi.it' },
-            { host: 'newdrop-bakery.org' }, // NEW drop
+        ? withTitles([
+            { host: 'mybrand-casino.com', title: 'MyBrand Casino' },
+            { host: 'beachxbums.com', title: 'MyBrand Sitio Oficial ᐉ MyBrand Acceso' },
+            { host: 'hanami-sushi.it', title: 'MyBrand ᐉ Bonus' },
+            { host: 'newdrop-bakery.org', title: 'MyBrand ᐉ New' }, // NEW drop (marker)
           ])
-        : serp([{ host: 'other-casino.com' }]);
+        : withTitles([{ host: 'other-casino.com', title: 'Other' }]);
     await runSweep(env, fire, serpFor2);
     const d3 = env.calls.tg.slice().filter((m) => m.includes('Нові дропи'));
     ok(d3.length === 1 && d3[0].includes('newdrop-bakery.org') && !d3[0].includes('beachxbums.com'), '12.6 only the newly-appeared drop is alerted');
@@ -645,8 +648,8 @@ async function main() {
     env3.store.telegramChatId = 'CHAT';
     env3.store.digestEveryRun = false;
     env3.store.dropAlerts = false; // OFF
-    await runSweep(env3, fire3, () => serp([{ host: 'mybrand-casino.com' }, { host: 'beachxbums.com' }]));
-    ok(!env3.calls.tg.some((m) => m.includes('Нові дропи')), '12.7 dropAlerts=false suppresses drop alerts');
+    await runSweep(env3, fire3, () => withTitles([{ host: 'mybrand-casino.com', title: 'MyBrand' }, { host: 'beachxbums.com', title: 'MyBrand ᐉ x' }]));
+    ok(!env3.calls.tg.some((m) => m.includes('Нові дропи')), '12.7 dropAlerts=false suppresses drop alerts (marker drop present but muted)');
   }
 
   // ---------------------------------------------------------------------
