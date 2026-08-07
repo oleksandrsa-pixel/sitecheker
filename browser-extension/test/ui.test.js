@@ -470,8 +470,10 @@ async function main() {
     ok(serp.find((x) => x.host === 'megaslots-casino.com').kind === 'comp', 'K.5 gambling domain -> competitor');
 
     // gambling-word detector (the core of the heuristic)
-    ok(ctx.isGambling('winbeatz-casino1.com') && ctx.isGambling('megaslots-casino.com') && ctx.isGambling('spinpolocasino.it'), 'K.6 gambling words detected in casino domains');
+    ok(ctx.isGambling('winbeatz-casino1.com') && ctx.isGambling('megaslots-casino.com') && ctx.isGambling('spinpolocasino.it') && ctx.isGambling('x3bet.es') && ctx.isGambling('22bet-online1.com'), 'K.6 gambling detected (incl. digit-adjacent x3bet/22bet)');
     ok(!ctx.isGambling('beachxbums.com') && !ctx.isGambling('hanami-sushi.it') && !ctx.isGambling('santinavarro.com') && !ctx.isGambling('settegradinord.it'), 'K.7 off-topic drop domains are NOT gambling');
+    // coincidental English substrings must NOT read as gambling (else a real drop is missed)
+    ok(!ctx.isGambling('baldwinlaw.com') && !ctx.isGambling('sherbetcafe.fr') && !ctx.isGambling('winterdental.es') && !ctx.isGambling('potluckcatering.com') && !ctx.isGambling('betterhomes.com'), 'K.7b baldwin/sherbet/winter/potluck/better are NOT gambling (bounded short stems)');
 
     // the confirmed list toggles the label
     const noList = ctx.buildSerp(check, []);

@@ -26,13 +26,22 @@ const NOISE = [
 // carries one of these in its domain (your brands + real competitors + review
 // portals). A domain with NONE of them, that isn't yours and isn't a mainstream
 // site, is the tell-tale "drop". Tuned toward this niche's vocabulary — extend
-// freely. (Substring match, so it also catches winbeatz/spinpolo/luckystart…)
+// freely.
+//
+// Unambiguous stems below are matched as plain substrings (rare inside normal
+// words: catches casino/casinò/kasyno, slot, gambling, poker, roulette…).
 const GAMBLING = [
-  'casino', 'kasino', 'kazino', 'cazino', 'kasyno', 'slot', 'gambl', 'poker',
-  'roulette', 'ruleta', 'roleta', 'jackpot', 'vegas', 'bet', 'win', 'spin',
-  'luck', 'bonus', 'stake', 'wager', 'scommesse', 'apuest', 'aposta', 'bookmaker',
-  'betting', 'wett', 'spela', 'casin',
+  'casino', 'casin', 'kasino', 'kazino', 'cazino', 'kasyno', 'slot', 'gambl',
+  'poker', 'roulette', 'ruleta', 'roleta', 'jackpot', 'vegas', 'bonus',
+  'scommesse', 'apuest', 'aposta', 'bookmaker', 'betting', 'wager', 'spela',
 ];
+// Short, VERY common stems match ONLY when isolated by a non-letter (digit /
+// dash / dot / start / end). So casino brands like x3bet, 22bet, 20bet are
+// caught, but ordinary business names that merely contain the fragment
+// (baldwin, sherbet, winter, potluck, mistake, betterhomes) are NOT — those
+// stay flagged as drops. A false "gambling" hit here would MISS a drop, the
+// worst error for this tab, so we deliberately bias toward catching odd domains.
+const GAMBLING_BOUNDED = /(^|[^a-z])(bet|win|spin|luck|stake)([^a-z]|$)/;
 
 const hostMatches = (host, base) => {
   const h = (host || '').replace(/^www\./, '').toLowerCase();
@@ -43,7 +52,8 @@ const isNoise = (host) => NOISE.some((n) => hostMatches(host, n));
 
 function isGambling(host) {
   const h = (host || '').replace(/^www\./, '').toLowerCase();
-  return !!h && GAMBLING.some((t) => h.includes(t));
+  if (!h) return false;
+  return GAMBLING.some((t) => h.includes(t)) || GAMBLING_BOUNDED.test(h);
 }
 
 // Normalise anything the user pastes into the drop-list to a registrable host.
@@ -174,10 +184,12 @@ function load() {
 }
 
 function populateGeo() {
+  const prev = $('geo').value; // keep the user's selection across reloads / refresh
   const geos = [...new Set(ROWS.map((r) => r.geo).filter(Boolean))].sort();
   $('geo').innerHTML =
     '<option value="">Усі гео</option>' +
     geos.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+  if (prev && geos.includes(prev)) $('geo').value = prev;
 }
 
 function view() {
