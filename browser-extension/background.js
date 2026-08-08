@@ -876,6 +876,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg?.type === 'rankpeek:start') {
       await startSweep();
       sendResponse?.({ ok: true });
+    } else if (msg?.type === 'rankpeek:startActive') {
+      // Manual on-demand run scoped to just the active brands (dropWatch).
+      const s = await getSweep();
+      if (s?.running) {
+        sendResponse?.({ ok: false, reason: 'busy' });
+      } else {
+        const started = await startSweep('active');
+        sendResponse?.({ ok: started, reason: started ? '' : 'empty' });
+      }
     } else if (msg?.type === 'rankpeek:stop') {
       await stopSweep();
       sendResponse?.({ ok: true });

@@ -712,6 +712,38 @@ async function main() {
     ok(!env2.store.sweep || !env2.store.sweep.running, '13.5 no active brands -> active sweep does not start');
   }
 
+  // ---------------------------------------------------------------------
+  section('14. Manual "run drops" trigger (rankpeek:startActive)');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    env.store.sweepTargets = [
+      { site: 'Act', domain: 'act-casino.com', keyword: 'act', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'Big', domain: 'big-casino.com', keyword: 'big', gl: 'fr', hl: 'fr', geo: 'France' },
+    ];
+    env.store.dropWatch = ['act-casino.com'];
+
+    // idle + active brand set -> manual trigger starts a scoped active sweep
+    await fire.message({ type: 'rankpeek:startActive' });
+    ok(env.store.sweep && env.store.sweep.running && env.store.sweep.scope === 'active', '14.1 manual trigger starts a scoped active sweep');
+    ok(env.store.sweep.targets.length === 1 && env.store.sweep.targets[0].domain === 'act-casino.com', '14.2 scoped to active brands only (Big excluded)');
+
+    // while a sweep is running -> ignored (no change)
+    const snap = JSON.stringify(env.store.sweep);
+    await fire.message({ type: 'rankpeek:startActive' });
+    ok(JSON.stringify(env.store.sweep) === snap, '14.3 ignored while a sweep is already running');
+
+    // empty active list -> nothing starts
+    const env2 = makeEnv();
+    loadBackground(env2);
+    const fire2 = makeDriver(env2);
+    env2.store.sweepTargets = [{ site: 'Big', domain: 'big-casino.com', keyword: 'big', gl: 'fr', hl: 'fr', geo: 'France' }];
+    env2.store.dropWatch = [];
+    await fire2.message({ type: 'rankpeek:startActive' });
+    ok(!env2.store.sweep || !env2.store.sweep.running, '14.4 empty active list -> nothing starts');
+  }
+
   // done
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;

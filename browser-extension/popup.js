@@ -112,6 +112,25 @@ $('save').addEventListener('click', () => {
 
 $('run').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'rankpeek:start' }));
 $('stop').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'rankpeek:stop' }));
+
+// Manual scoped run over ONLY the active brands (dropWatch list on the Drops tab).
+$('runactive').addEventListener('click', () => {
+  $('runmsg').style.color = 'var(--muted)';
+  $('runmsg').textContent = '🎯 Запускаю прогін дропів…';
+  chrome.runtime.sendMessage({ type: 'rankpeek:startActive' }, (resp) => {
+    if (resp && resp.ok) {
+      $('runmsg').style.color = '#34d399';
+      $('runmsg').textContent = '🎯 Прогін активних брендів пішов — дивись статус вище.';
+    } else if (resp && resp.reason === 'busy') {
+      $('runmsg').style.color = '#fbbf24';
+      $('runmsg').textContent = 'Прохід уже йде — зачекай, поки завершиться.';
+    } else {
+      $('runmsg').style.color = '#f87171';
+      $('runmsg').textContent = 'Список активних брендів порожній — додай їх на вкладці «Дропи».';
+    }
+    setTimeout(() => ($('runmsg').textContent = ''), 4000);
+  });
+});
 $('report').addEventListener('click', () =>
   chrome.tabs.create({ url: chrome.runtime.getURL('report.html') }),
 );
