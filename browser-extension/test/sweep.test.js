@@ -744,6 +744,43 @@ async function main() {
     ok(!env2.store.sweep || !env2.store.sweep.running, '14.4 empty active list -> nothing starts');
   }
 
+  // ---------------------------------------------------------------------
+  section('15. Active sweep uses FULL drops targets directly (not limited to the main list)');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    // main list has only Big; the drops watchlist carries two brands NOT in it,
+    // each with its own keyword + geo (the full-CSV format)
+    env.store.sweepTargets = [{ site: 'Big', domain: 'big-casino.com', keyword: 'big', gl: 'fr', hl: 'fr', geo: 'France' }];
+    env.store.dropWatch = [
+      { site: 'Winner', domain: 'winnercasino-it.com', keyword: 'winner', gl: 'it', hl: 'it', geo: 'Italy' },
+      { site: 'Twin', domain: 'twincasinos-pt.com', keyword: 'twin', gl: 'pt', hl: 'pt', geo: 'Portugal' },
+    ];
+    await fire.alarm('activeSweep');
+    const swept = [];
+    let guard = 0;
+    while (env.store.sweep && env.store.sweep.running && guard < 200) {
+      guard += 1;
+      const s = env.store.sweep;
+      if (s.paused) break;
+      if (!s.current) {
+        if (env.alarms.next) { await fire.alarm('next'); continue; }
+        break;
+      }
+      const t = s.current.target;
+      swept.push(t.domain);
+      await fire.message(
+        { type: 'rankpeek:serp', payload: { q: t.keyword, gl: t.gl, results: serpWithTarget(t.domain, 1) } },
+        { tab: { id: s.current.tabId } },
+      );
+      if (env.alarms.next) await fire.alarm('next');
+    }
+    const uniq = [...new Set(swept)].sort();
+    ok(uniq.length === 2 && uniq.includes('winnercasino-it.com') && uniq.includes('twincasinos-pt.com'), '15.1 active sweep checks the full drops targets even though they are NOT in the main list', JSON.stringify(uniq));
+    ok(!uniq.includes('big-casino.com'), '15.2 a main-list brand not in the drops watchlist is not swept by the active pass');
+  }
+
   // done
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;

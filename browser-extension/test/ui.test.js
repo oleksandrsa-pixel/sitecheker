@@ -479,9 +479,12 @@ async function main() {
     ok(shown.length === 1 && shown[0].domain === 'zoccer-online-casino.com', 'K.8 view() shows only the active (watched) brand, hides b.com');
     ok(shown[0].drops === 2, 'K.9 watched brand reports exactly the 2 ᐉ-marked drops (review/competitor/aggregator excluded)');
 
-    // watchlist parsing from a pasted list / CSV (domains only, headers skipped)
-    const parsed = ctx.parseWatchInput('GEO,Brand,Domain,keyword\nItaly,Betscore,https://betscore-1casino.com/it8-it8/,Betscore\nspinpolocasino.it');
-    ok(parsed.length === 2 && parsed.includes('betscore-1casino.com') && parsed.includes('spinpolocasino.it'), 'K.10 parseWatchInput extracts domains from CSV + bare lines, skips header');
+    // watchlist parsing — full CSV format (Domain, keyword, second keyword, GEO)
+    const parsed = ctx.parseWatchTargets('Domain,keyword,second keyword,GEO\nhttps://betscore-1casino.com/it8-it8/,betscore,betscore casino,Italy\nspinpolocasino.it,spinpolo,,Italy');
+    ok(parsed.length === 3, 'K.10 parseWatchTargets expands second keyword (betscore ×2 + spinpolo ×1 = 3 targets)', String(parsed.length));
+    ok(parsed.some((t) => t.domain === 'betscore-1casino.com' && t.keyword === 'betscore casino' && t.gl === 'it'), 'K.10b full targets carry keyword + geo->gl');
+    const bareT = ctx.parseWatchTargets('winnercasino-it.com\ntwincasinos-pt.com');
+    ok(bareT.length === 2 && bareT[0].domain === 'winnercasino-it.com' && !bareT[0].keyword, 'K.10c bare-domain list -> domain-only entries (filter fallback)');
 
     const csv = ctx.buildCsv();
     ok(csv.startsWith('﻿sep=,'), 'K.11 CSV starts with BOM + sep=, hint');

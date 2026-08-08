@@ -63,10 +63,30 @@ function hasMarker(title) {
 }
 
 // ---- Active-brand watchlist (the only thing you maintain) -------------------
+//
+// The watchlist is a FULL target list in the same shape as the main site CSV:
+// Domain, keyword, second keyword, GEO. Parsed into targets so the active-brand
+// sweep can check EVERY drop-brand directly (with its own keyword + geo), not
+// only the ones that happen to be in the main site list. Legacy domain strings
+// (older saves) still work as a plain view/alert filter.
 
-let WATCH = []; // registrable domains of brands you're currently launching
+let WATCH = []; // target objects {site,domain,keyword,gl,hl,geo} (or legacy domain strings)
+let WATCH_DOMAINS = []; // unique registrable domains of the watched brands
 
-const inWatch = (domain) => WATCH.some((d) => hostMatches(domain, d));
+const norm = (d) => String(d || '').replace(/^www\./, '').toLowerCase();
+function watchDomains(list) {
+  const out = [];
+  const seen = new Set();
+  for (const x of list || []) {
+    const d = norm(typeof x === 'string' ? x : x && x.domain);
+    if (d && !seen.has(d)) { seen.add(d); out.push(d); }
+  }
+  return out;
+}
+// Full, sweepable targets (have a keyword + gl/hl) vs bare domain entries.
+const watchTargets = (list) =>
+  (list || []).filter((x) => x && typeof x === 'object' && x.domain && x.keyword && x.gl && x.hl);
+const inWatch = (domain) => WATCH_DOMAINS.some((d) => hostMatches(domain, d));
 
 function parseHost(value) {
   const raw = (value || '').trim();
@@ -104,29 +124,126 @@ function splitCsvLine(line, delim) {
   return out;
 }
 
-// Pull brand domains out of a pasted list OR a CSV. Robust to the main
-// site-list format: on each line we take the first cell that parses to a real
-// host (contains a dot), skipping header words and any `sep=` hint.
-function parseWatchInput(text) {
-  const out = [];
+// Country -> Google gl (country) + hl (language). Keep roughly in sync with the
+// GEO_MAP in popup.js.
+const GEO_MAP = {
+  italy: { gl: 'it', hl: 'it' }, greece: { gl: 'gr', hl: 'el' }, portugal: { gl: 'pt', hl: 'pt' },
+  france: { gl: 'fr', hl: 'fr' }, spain: { gl: 'es', hl: 'es' }, germany: { gl: 'de', hl: 'de' },
+  brazil: { gl: 'br', hl: 'pt-BR' }, 'united kingdom': { gl: 'uk', hl: 'en' }, uk: { gl: 'uk', hl: 'en' },
+  poland: { gl: 'pl', hl: 'pl' }, netherlands: { gl: 'nl', hl: 'nl' }, austria: { gl: 'at', hl: 'de' },
+  switzerland: { gl: 'ch', hl: 'de' }, belgium: { gl: 'be', hl: 'fr' }, ireland: { gl: 'ie', hl: 'en' },
+  canada: { gl: 'ca', hl: 'en' }, romania: { gl: 'ro', hl: 'ro' }, hungary: { gl: 'hu', hl: 'hu' },
+  czechia: { gl: 'cz', hl: 'cs' }, 'czech republic': { gl: 'cz', hl: 'cs' }, sweden: { gl: 'se', hl: 'sv' },
+  norway: { gl: 'no', hl: 'no' }, finland: { gl: 'fi', hl: 'fi' }, denmark: { gl: 'dk', hl: 'da' },
+  turkey: { gl: 'tr', hl: 'tr' }, mexico: { gl: 'mx', hl: 'es' }, chile: { gl: 'cl', hl: 'es' },
+  argentina: { gl: 'ar', hl: 'es' }, japan: { gl: 'jp', hl: 'ja' }, india: { gl: 'in', hl: 'en' },
+};
+function geoToGlHl(geo, lang) {
+  const key = String(geo || '').trim().toLowerCase();
+  if (GEO_MAP[key]) return GEO_MAP[key];
+  const l = String(lang || '').trim().toLowerCase();
+  if (/^[a-z]{2}$/.test(key)) return { gl: key, hl: l || key };
+  return { gl: l || 'us', hl: l || 'en' };
+}
+function titleCase(s) {
+  const t = (s || '').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
+const HEADER_WORD = /^(domain|url|website|site|site_url|link|keyword|second keyword|geo|country|brand|name|location|location_name|language_code|lang|is_active)$/i;
+function bareTarget(cell) {
+  const c = String(cell || '').trim();
+  if (!c || HEADER_WORD.test(c)) return null;
+  const d = parseHost(c);
+  return d && d.includes('.') ? { site: d, domain: d } : null;
+}
+function dedupeTargets(list) {
   const seen = new Set();
-  const HEADER = /^(domain|url|website|site|site_url|link|keyword|second keyword|geo|country|brand|name|location|language_code|lang|is_active)$/i;
-  for (const rawLine of String(text || '').split(/\r?\n/)) {
-    const line = rawLine.replace(/^﻿/, '').trim();
-    if (!line || /^sep=/i.test(line)) continue;
-    const delim = /[,;\t]/.test(line) ? detectDelim(line) : '\n';
-    const cells = delim === '\n' ? [line] : splitCsvLine(line, delim);
-    for (const cell of cells) {
-      const c = cell.trim();
-      if (!c || HEADER.test(c)) continue;
-      const h = parseHost(c);
-      if (h && h.includes('.')) {
-        if (!seen.has(h)) { seen.add(h); out.push(h); }
-        break; // one domain per line
-      }
-    }
+  const out = [];
+  for (const t of list) {
+    const key = `${norm(t.domain)}|${(t.keyword || '').toLowerCase()}|${t.gl || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
   }
   return out;
+}
+
+// Parse the drops watchlist. Accepts the full site-CSV format
+// (Domain, keyword, second keyword, GEO — headers/aliases, sep= hint, ; or ,
+// delimiter, is_active) AND a plain one-domain-per-line list. Rows with a
+// keyword+geo become full sweepable targets; bare domains become domain-only
+// entries used just to filter the view / alerts.
+function parseWatchTargets(text) {
+  let lines = String(text || '').split(/\r?\n/).filter((l) => l.trim() !== '');
+  if (!lines.length) return [];
+  lines[0] = lines[0].replace(/^﻿/, '');
+  if (/^sep=(.)\s*$/i.test(lines[0])) {
+    lines = lines.slice(1);
+    if (lines.length) lines[0] = lines[0].replace(/^﻿/, '');
+  }
+  if (!lines.length) return [];
+
+  const first = lines[0] || '';
+  const delim = /[,;\t]/.test(first) ? detectDelim(first) : null;
+  if (!delim) return dedupeTargets(lines.map((l) => bareTarget(l)).filter(Boolean));
+
+  const header = splitCsvLine(lines[0], delim).map((h) => h.trim().toLowerCase());
+  const idx = (aliases) => {
+    for (const a of aliases) { const i = header.indexOf(a); if (i >= 0) return i; }
+    return -1;
+  };
+  const iDomain = idx(['domain', 'url', 'website', 'site', 'link', 'site_url', 'site url']);
+  const iKw = idx(['keyword', 'key', 'kw', 'keyword1', 'main keyword', 'main_keyword']);
+  const iKw2 = idx(['second keyword', 'second_keyword', 'keyword2', 'kw2', 'second key', 'additional keyword', 'extra keyword']);
+  const iGeo = idx(['geo', 'country', 'location', 'location_name']);
+  const iLang = idx(['language_code', 'lang', 'language', 'hl']);
+  const iBrand = idx(['brand', 'name', 'brand name', 'brand_name']);
+  const iActive = idx(['is_active', 'active', 'enabled']);
+  const hasHeader = iDomain >= 0 || iKw >= 0 || iGeo >= 0 || iBrand >= 0;
+  if (!hasHeader) {
+    return dedupeTargets(lines.map((l) => bareTarget(splitCsvLine(l, delim)[0])).filter(Boolean));
+  }
+
+  const domainCol = iDomain >= 0 ? iDomain : 0;
+  const out = [];
+  for (let r = 1; r < lines.length; r += 1) {
+    const c = splitCsvLine(lines[r], delim);
+    if (iActive >= 0 && !/^(true|1|yes|y|on)$/i.test((c[iActive] || '').trim())) continue;
+    const domain = parseHost(c[domainCol] || '');
+    if (!domain || !domain.includes('.')) continue;
+    const geo = iGeo >= 0 ? (c[iGeo] || '').trim() : '';
+    const { gl, hl } = geoToGlHl(geo, iLang >= 0 ? c[iLang] : '');
+    const mainKw = iKw >= 0 ? (c[iKw] || '').trim() : '';
+    const brand = iBrand >= 0 ? (c[iBrand] || '').trim() : '';
+    const site = brand || titleCase(mainKw) || domain;
+    const geoLabel = geo || (gl ? gl.toUpperCase() : '');
+    const kws = [];
+    if (mainKw) kws.push(mainKw);
+    if (iKw2 >= 0 && (c[iKw2] || '').trim()) kws.push((c[iKw2] || '').trim());
+    if (!kws.length) { out.push({ site, domain, geo: geoLabel }); continue; }
+    for (const keyword of kws) out.push({ site, domain, keyword, gl, hl, geo: geoLabel });
+  }
+  return dedupeTargets(out);
+}
+
+// Reconstruct editable text for the textarea from a stored watchlist (used only
+// when no raw text was saved — e.g. legacy domain-string saves).
+function watchToText(list) {
+  if (!list || !list.length) return '';
+  if (list.every((x) => typeof x === 'string')) return list.join('\n');
+  const lines = ['Domain,keyword,GEO'];
+  const seen = new Set();
+  for (const t of list) {
+    const d = typeof t === 'string' ? t : t.domain;
+    const kw = typeof t === 'string' ? '' : t.keyword || '';
+    const geo = typeof t === 'string' ? '' : t.geo || '';
+    const key = `${d}|${kw}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push([d, kw, geo].join(','));
+  }
+  return lines.join('\n');
 }
 
 function esc(s) {
@@ -197,37 +314,60 @@ let ROWS = [];
 // Config (watchlist) — read once on open and after a save; kept separate from
 // the data reload so auto-refresh never clobbers the textarea while you type.
 function loadWatch(cb) {
-  chrome.storage.local.get(['dropWatch'], (v) => {
+  chrome.storage.local.get(['dropWatch', 'dropWatchText'], (v) => {
     WATCH = Array.isArray(v.dropWatch) ? v.dropWatch : [];
-    if ($('watchlist')) $('watchlist').value = WATCH.join('\n');
+    WATCH_DOMAINS = watchDomains(WATCH);
+    if ($('watchlist')) $('watchlist').value = v.dropWatchText != null ? v.dropWatchText : watchToText(WATCH);
     if (cb) cb();
   });
 }
 
 function loadData() {
   chrome.storage.local.get(['lastChecks'], (v) => {
-    ROWS = Object.values(v.lastChecks || {})
-      .map((c) => {
-        const serp = buildSerp(c);
-        return {
-          site: c.site || c.domain,
-          keyword: c.keyword,
-          geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
-          gl: c.gl,
-          domain: c.domain,
-          position: c.position,
-          error: c.error || null,
-          checkedAt: c.checkedAt || '',
-          serp,
-          drops: dropCount(serp),
-        };
-      })
-      .sort((a, b) =>
-        (b.drops - a.drops) || // queries with drops float to the top
-        (a.site || '').localeCompare(b.site || '') ||
-        (a.geo || '').localeCompare(b.geo || '') ||
-        (a.keyword || '').localeCompare(b.keyword || ''),
-      );
+    ROWS = Object.values(v.lastChecks || {}).map((c) => {
+      const serp = buildSerp(c);
+      return {
+        site: c.site || c.domain,
+        keyword: c.keyword,
+        geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
+        gl: c.gl,
+        domain: c.domain,
+        position: c.position,
+        error: c.error || null,
+        checkedAt: c.checkedAt || '',
+        serp,
+        drops: dropCount(serp),
+      };
+    });
+
+    // Show every active-brand query, even the ones not swept yet, as "pending" —
+    // so you immediately see all watched brands (not only those already checked).
+    const checked = new Set(ROWS.map((r) => `${norm(r.domain)}|${(r.keyword || '').toLowerCase()}|${r.gl || ''}`));
+    for (const t of watchTargets(WATCH)) {
+      const key = `${norm(t.domain)}|${(t.keyword || '').toLowerCase()}|${t.gl || ''}`;
+      if (checked.has(key)) continue;
+      ROWS.push({
+        site: t.site || t.domain,
+        keyword: t.keyword,
+        geo: t.geo || (t.gl ? t.gl.toUpperCase() : ''),
+        gl: t.gl,
+        domain: t.domain,
+        position: undefined,
+        error: null,
+        checkedAt: '',
+        serp: [],
+        drops: 0,
+        pending: true,
+      });
+    }
+
+    ROWS.sort((a, b) =>
+      (a.pending === b.pending ? 0 : a.pending ? 1 : -1) || // checked first, pending last
+      (b.drops - a.drops) || // queries with drops float to the top
+      (a.site || '').localeCompare(b.site || '') ||
+      (a.geo || '').localeCompare(b.geo || '') ||
+      (a.keyword || '').localeCompare(b.keyword || ''),
+    );
     populateGeo();
     render();
   });
@@ -235,7 +375,7 @@ function loadData() {
 
 function populateGeo() {
   const prev = $('geo').value; // keep the user's selection across reloads / refresh
-  const pool = WATCH.length ? ROWS.filter((r) => inWatch(r.domain)) : ROWS;
+  const pool = WATCH_DOMAINS.length ? ROWS.filter((r) => inWatch(r.domain)) : ROWS;
   const geos = [...new Set(pool.map((r) => r.geo).filter(Boolean))].sort();
   $('geo').innerHTML =
     '<option value="">Усі гео</option>' +
@@ -248,7 +388,7 @@ function view() {
   const geo = $('geo').value;
   const onlydrops = $('onlydrops').checked;
   return ROWS.filter((r) => {
-    if (WATCH.length && !inWatch(r.domain)) return false; // scope to active brands
+    if (WATCH_DOMAINS.length && !inWatch(r.domain)) return false; // scope to active brands
     if (geo && r.geo !== geo) return false;
     if (onlydrops && r.drops === 0) return false;
     if (!q) return true;
@@ -279,37 +419,41 @@ function serpRow(x) {
 function render() {
   const rows = view();
   const totalDrops = rows.reduce((n, r) => n + r.drops, 0);
-  const brands = new Set(rows.map((r) => (r.domain || '').replace(/^www\./, '').toLowerCase())).size;
-  $('sub').textContent = WATCH.length
-    ? `${WATCH.length} активних брендів · ${rows.length} запитів · знайдено дропів у топ-10: ${totalDrops}`
+  const pendingCount = rows.filter((r) => r.pending).length;
+  const pendTxt = pendingCount ? ` · ще не перевірено: ${pendingCount}` : '';
+  $('sub').textContent = WATCH_DOMAINS.length
+    ? `${WATCH_DOMAINS.length} активних брендів · ${rows.length} запитів · знайдено дропів у топ-10: ${totalDrops}${pendTxt}`
     : `усі сайти: ${rows.length} запитів · дропів: ${totalDrops} · ⬆ завантаж CSV активних брендів, щоб бачити лише їх`;
 
-  if (!ROWS.length) {
-    $('list').innerHTML = '<div class="empty">Нема даних. Зроби прохід у розширенні (▶ Прохід), тоді онови цю сторінку.</div>';
-    return;
-  }
   if (!rows.length) {
-    $('list').innerHTML = WATCH.length
-      ? `<div class="empty">Жоден з ${WATCH.length} активних брендів ще не має даних з прогону.<br />Переконайся, що ці домени є у списку сайтів (розділ CSV), і зроби ▶ Прохід — дані з'являться тут.</div>`
-      : '<div class="empty">Нічого не знайдено за фільтром.</div>';
+    $('list').innerHTML = WATCH_DOMAINS.length
+      ? '<div class="empty">Список активних брендів збережено, але даних ще нема. Натисни <b>🎯 Прогін дропів</b> у popup — і результати зʼявляться тут.</div>'
+      : (ROWS.length
+        ? '<div class="empty">Нічого не знайдено за фільтром.</div>'
+        : '<div class="empty">Нема даних. Зроби прохід у розширенні (▶ Прохід), тоді онови цю сторінку.</div>');
     return;
   }
   $('list').innerHTML = rows
     .map((r) => {
-      const body = r.serp.length
-        ? r.serp.map(serpRow).join('')
-        : `<div class="none">${r.error ? 'Перевірка з помилкою (' + esc(r.error) + ')' : 'Видачі не зчитано'}</div>`;
-      const dropBadge = r.drops
-        ? `<span class="dropcount">🎯 дропів: ${r.drops}</span>`
-        : '<span class="dropcount zero">без дропів</span>';
+      const body = r.pending
+        ? '<div class="none">⏳ ще не перевірено — натисни «🎯 Прогін дропів» у popup</div>'
+        : r.serp.length
+          ? r.serp.map(serpRow).join('')
+          : `<div class="none">${r.error ? 'Перевірка з помилкою (' + esc(r.error) + ')' : 'Видачі не зчитано'}</div>`;
+      const dropBadge = r.pending
+        ? '<span class="dropcount zero">⏳ ще не перевірено</span>'
+        : r.drops
+          ? `<span class="dropcount">🎯 дропів: ${r.drops}</span>`
+          : '<span class="dropcount zero">без дропів</span>';
+      const posCell = r.pending ? '<span class="pill p-mid">⏳</span>' : myPill(r);
       return (
-        '<div class="card">' +
+        `<div class="card${r.pending ? ' pending' : ''}">` +
         '<div class="head">' +
         `<span class="brand">${esc(r.site)}</span>` +
         `<span class="kw">«${esc(r.keyword)}»</span>` +
         `<span class="geo">${esc(r.geo)}</span>` +
         dropBadge +
-        `<span class="me"><span class="lbl">моя позиція:</span> ${myPill(r)}` +
+        `<span class="me"><span class="lbl">моя позиція:</span> ${posCell}` +
         (r.checkedAt ? ` <span class="badge">${fmtTime(r.checkedAt)}</span>` : '') +
         '</span>' +
         '</div>' +
@@ -357,23 +501,27 @@ function fallbackCopy(text, done) {
 
 // ---- Save / import the active-brand watchlist ------------------------------
 
-function applyWatch(list) {
-  chrome.storage.local.set({ dropWatch: list }, () => {
-    WATCH = list;
-    if ($('watchlist')) $('watchlist').value = list.join('\n');
+function applyWatch(targets, text) {
+  chrome.storage.local.set({ dropWatch: targets, dropWatchText: text }, () => {
+    WATCH = targets;
+    WATCH_DOMAINS = watchDomains(targets);
+    if ($('watchlist')) $('watchlist').value = text;
     if ($('watchmsg')) {
-      $('watchmsg').style.color = '#34d399';
-      $('watchmsg').textContent = list.length
-        ? `Збережено ✓ ${list.length} активних брендів`
+      const brands = WATCH_DOMAINS.length;
+      const queries = watchTargets(targets).length;
+      $('watchmsg').style.color = brands ? '#34d399' : '#9aa0bd';
+      $('watchmsg').textContent = brands
+        ? `Збережено ✓ ${brands} брендів${queries ? `, ${queries} запитів` : ' (без ключів — додай keyword/GEO)'}`
         : 'Список очищено — показую всі сайти';
-      setTimeout(() => ($('watchmsg').textContent = ''), 2500);
+      setTimeout(() => ($('watchmsg').textContent = ''), 3000);
     }
     loadData();
   });
 }
 
 function saveWatch() {
-  applyWatch(parseWatchInput($('watchlist').value));
+  const text = $('watchlist').value;
+  applyWatch(parseWatchTargets(text), text);
 }
 
 // ---- CSV export (full SERP, Excel-friendly) --------------------------------
@@ -430,13 +578,14 @@ if ($('watchcsv')) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const list = parseWatchInput(String(reader.result));
-      if ($('watchmsg') && !list.length) {
+      const text = String(reader.result);
+      const targets = parseWatchTargets(text);
+      if ($('watchmsg') && !targets.length) {
         $('watchmsg').style.color = '#f87171';
         $('watchmsg').textContent = 'У файлі не знайдено доменів';
         return;
       }
-      applyWatch(list);
+      applyWatch(targets, text);
     };
     reader.readAsText(file, 'utf-8');
   });

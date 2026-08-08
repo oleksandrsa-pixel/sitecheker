@@ -75,6 +75,21 @@ const hasMarker = (title) => {
 const isDrop = (entry, ownDomains) =>
   hasMarker(entry && entry.title) && !isOwn(entry && entry.host, ownDomains);
 
+// The active-brand watchlist (dropWatch) is a full target list (Domain, keyword,
+// GEO) — same shape as sweepTargets — so the active sweep can check every
+// drop-brand directly. Legacy saves may be plain domain strings.
+const watchTargets = (list) =>
+  (list || []).filter((x) => x && typeof x === 'object' && x.domain && x.keyword && x.gl && x.hl);
+function watchDomains(list) {
+  const out = [];
+  const seen = new Set();
+  for (const x of list || []) {
+    const d = registrable(typeof x === 'string' ? x : x && x.domain);
+    if (d && !seen.has(d)) { seen.add(d); out.push(d); }
+  }
+  return out;
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Random jitter so gaps between queries never look mechanical (±35%).
@@ -318,9 +333,9 @@ async function maybeAlertDrops(s, result) {
   if (!s.telegramToken || !s.telegramChatId) return;
   const data = await chrome.storage.local.get(['dropWatch', 'dropsSeen', 'dropAlerts']);
   if (data.dropAlerts === false) return; // toggle, default ON
-  const watch = Array.isArray(data.dropWatch) ? data.dropWatch : [];
-  if (!watch.length) return; // no active brands defined -> nothing to watch
-  if (!watch.some((d) => matchHost(result.domain, d))) return; // this brand isn't active
+  const domains = watchDomains(data.dropWatch);
+  if (!domains.length) return; // no active brands defined -> nothing to watch
+  if (!domains.some((d) => matchHost(result.domain, d))) return; // this brand isn't active
 
   const ownDomains = (s.targets || []).map((t) => t.domain);
   const currentDrops = (result.topResults || [])
@@ -594,8 +609,18 @@ async function startSweep(scope = 'all') {
   let dripMode = cfg.dripMode;
   if (scope === 'active') {
     const watch = Array.isArray(c.dropWatch) ? c.dropWatch : [];
-    targets = (cfg.targets || []).filter((t) => watch.some((d) => matchHost(t.domain, d)));
-    if (!targets.length) return false; // no active brands configured — nothing to do
+    const full = watchTargets(watch);
+    if (full.length) {
+      // The drops watchlist carries its own keyword + geo → sweep those targets
+      // directly, independent of the main site list, so EVERY drop-brand is
+      // checked (not only the ones that also live in the main list).
+      targets = full;
+    } else {
+      // Legacy domain-only watchlist → check the matching main-list targets.
+      const domains = watchDomains(watch);
+      targets = (cfg.targets || []).filter((t) => domains.some((d) => matchHost(t.domain, d)));
+    }
+    if (!targets.length) return false; // nothing active to sweep
     dripMode = false; // scoped active pass is a one-shot burst, never a 24/7 drip
   }
   await setSweep({
