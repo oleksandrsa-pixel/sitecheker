@@ -830,12 +830,12 @@ async function main() {
     const ctx = loadBackground(env);
 
     const H = ['domain', 'brand', 'Type', 'geo'];
-    // parseSheetGrids directly: "+"-in-name tab active; plain tab inactive; flag-column tab partial
-    const titles = ['Gamblerina FR +', '20bet IT', 'hahaspin ES'];
+    // parseSheetGrids directly: "*"-in-name tab active; plain tab inactive; flag-column tab partial
+    const titles = ['Gamblerina FR *', '20bet IT', 'hahaspin ES'];
     const grids = {
-      'Gamblerina FR +': [H, ['meuse-internet.fr', 'Gamblerina', 'monobrand', 'FR'], ['carpes-koi.fr', 'Gamblerina', 'monobrand', 'FR']],
-      '20bet IT': [H, ['somedrop.it', '20bet', 'monobrand', 'IT']], // no "+" -> skipped
-      'hahaspin ES': [['domain', 'brand', 'Type', 'geo', 'check'], ['drop1.es', 'Hahaspin', 'monobrand', 'ES', '+'], ['drop2.es', 'Hahaspin', 'monobrand', 'ES', '']],
+      'Gamblerina FR *': [H, ['meuse-internet.fr', 'Gamblerina', 'monobrand', 'FR'], ['carpes-koi.fr', 'Gamblerina', 'monobrand', 'FR']],
+      '20bet IT': [H, ['somedrop.it', '20bet', 'monobrand', 'IT']], // no "*" -> skipped
+      'hahaspin ES': [['domain', 'brand', 'Type', 'geo', 'check'], ['drop1.es', 'Hahaspin', 'monobrand', 'ES', '*'], ['drop2.es', 'Hahaspin', 'monobrand', 'ES', '']],
     };
     const parsed = ctx.parseSheetGrids(titles, titles.map((t) => ({ values: grids[t] })));
     // 2 active projects × 2 queries each (brand + "brand casino"); 20bet IT skipped
@@ -848,8 +848,8 @@ async function main() {
     const bare = ctx.parseSheetGrids(titles, titles.map((t) => ({ values: grids[t] })), '');
     ok(bare.targets.length === 2 && bare.targets.every((t) => !/ casino$/.test(t.keyword)), '17.3b empty extra -> brand-only query');
     const hah = parsed.targets.find((t) => t.site === 'Hahaspin');
-    ok(hah && parsed.drops[hah.domain].length === 1 && parsed.drops[hah.domain][0] === 'drop1.es', '17.4 flag column: only "+"-marked row active');
-    ok(!parsed.targets.some((t) => t.site === '20bet'), '17.5 tab without "+" not tracked');
+    ok(hah && parsed.drops[hah.domain].length === 1 && parsed.drops[hah.domain][0] === 'drop1.es', '17.4 flag column: only "*"-marked row active');
+    ok(!parsed.targets.some((t) => t.site === '20bet'), '17.5 tab without "*" not tracked');
 
     // full syncSheet flow via the API mock + rankpeek:syncSheet
     env.store.__sheet = { titles, grids };

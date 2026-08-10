@@ -119,13 +119,14 @@ function watchDomains(list) {
 // Reads the whole spreadsheet via the Sheets API (read-only key): every tab is a
 // project, columns Domain/brand/Type/geo, and each row's `domain` is an actual
 // drop domain deployed for that brand+geo. Auto-picks up new tabs and new rows.
-// A tab is checked when its NAME contains "+" OR a row has "+" in a flag column;
-// remove the "+" and it stops being tracked on the next sync. Output: dropWatch
+// A tab is checked when its NAME contains "*" OR a row has "*" in a flag column;
+// remove the "*" and it stops being tracked on the next sync. ("*" not "+" — a
+// cell starting with "+" is parsed as a formula by Sheets.) Output: dropWatch
 // targets (one per active brand+geo) + sheetDrops (exact drop domains per
 // project) so the SERP scan can match your drops EXACTLY.
 const DEFAULT_SHEET_SYNC_MIN = 30;
-const SHEET_FLAG_COLS = ['+', 'check', 'active', 'on', 'monitor', 'статус', 'перевіряти', 'моніторити', 'моніторинг'];
-const truthyFlag = (v) => /^(\+|x|✓|✔|1|yes|y|on|true|так|да)$/i.test(String(v || '').trim());
+const SHEET_FLAG_COLS = ['*', 'check', 'active', 'on', 'monitor', 'статус', 'перевіряти', 'моніторити', 'моніторинг'];
+const truthyFlag = (v) => /^(\*|x|✓|✔|1|yes|y|on|true|так|да)$/i.test(String(v || '').trim());
 
 const GEO_MAP = {
   italy: { gl: 'it', hl: 'it' }, greece: { gl: 'gr', hl: 'el' }, portugal: { gl: 'pt', hl: 'pt' },
@@ -187,7 +188,7 @@ function parseSheetGrids(titles, valueRanges, extra) {
     const iGeo = col(['geo', 'гео', 'country', 'location']);
     const iFlag = col(SHEET_FLAG_COLS);
     if (iDom < 0 || iBrand < 0) continue; // not a project tab
-    const tabActive = title.includes('+'); // whole tab on when its name carries "+"
+    const tabActive = title.includes('*'); // whole tab on when its name carries "*"
     let tabHasActive = false;
     for (let r = 1; r < rows.length; r += 1) {
       const row = rows[r] || [];
