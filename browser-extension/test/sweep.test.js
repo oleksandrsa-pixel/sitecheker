@@ -597,21 +597,21 @@ async function main() {
     env.store.telegramChatId = 'CHAT';
     env.store.digestEveryRun = false; // isolate: only drop alerts in the stream
 
-    // Drops are identified by the ᐉ marker (U+1409) in the SERP title.
+    // Drops are identified by the ᐉ stencil title ("<Brand> Official Site ᐉ <Brand> Login").
     const withTitles = (arr) =>
       arr.map((x, i) => ({ host: x.host, position: i + 1, url: `https://${x.host}/`, title: x.title || x.host }));
     const serpFor = (t) =>
       t.domain === 'mybrand-casino.com'
         ? withTitles([
             { host: 'mybrand-casino.com', title: 'MyBrand Casino' }, // you
-            { host: 'beachxbums.com', title: 'MyBrand Sitio Oficial ᐉ MyBrand Acceso' }, // DROP (marker)
-            { host: 'megaslots-casino.com', title: 'MegaSlots real casino' }, // competitor, NO marker
-            { host: 'trustpilot.com', title: 'Reviews' }, // aggregator, NO marker
-            { host: 'hanami-sushi.it', title: 'MyBrand ᐉ Bonus' }, // DROP (marker)
+            { host: 'beachxbums.com', title: 'MyBrand Sitio Oficial ᐉ MyBrand Acceso' }, // DROP (stencil)
+            { host: 'megaslots-casino.com', title: 'MegaSlots real casino' }, // competitor, no stencil
+            { host: 'trustpilot.com', title: 'Reviews ᐉ Top Bonuses' }, // has ᐉ but NOT a stencil
+            { host: 'hanami-sushi.it', title: 'MyBrand Official Site ᐉ MyBrand Login' }, // DROP (stencil)
           ])
         : withTitles([
             { host: 'other-casino.com', title: 'Other' },
-            { host: 'santinavarro.com', title: 'MyBrand ᐉ Acceso' }, // marker, but this brand isn't active
+            { host: 'santinavarro.com', title: 'Other Official Site ᐉ Other Login' }, // a stencil, but this brand isn't active
           ]);
 
     // run1: two new drops on the active brand -> one alert listing both; none for Other
@@ -635,8 +635,8 @@ async function main() {
         ? withTitles([
             { host: 'mybrand-casino.com', title: 'MyBrand Casino' },
             { host: 'beachxbums.com', title: 'MyBrand Sitio Oficial ᐉ MyBrand Acceso' },
-            { host: 'hanami-sushi.it', title: 'MyBrand ᐉ Bonus' },
-            { host: 'newdrop-bakery.org', title: 'MyBrand ᐉ New' }, // NEW drop (marker)
+            { host: 'hanami-sushi.it', title: 'MyBrand Official Site ᐉ MyBrand Login' },
+            { host: 'newdrop-bakery.org', title: 'MyBrand Official Site ᐉ MyBrand Login' }, // NEW drop (stencil)
           ])
         : withTitles([{ host: 'other-casino.com', title: 'Other' }]);
     await runSweep(env, fire, serpFor2);
@@ -653,7 +653,7 @@ async function main() {
     env3.store.telegramChatId = 'CHAT';
     env3.store.digestEveryRun = false;
     env3.store.dropAlerts = false; // OFF
-    await runSweep(env3, fire3, () => withTitles([{ host: 'mybrand-casino.com', title: 'MyBrand' }, { host: 'beachxbums.com', title: 'MyBrand ᐉ x' }]));
+    await runSweep(env3, fire3, () => withTitles([{ host: 'mybrand-casino.com', title: 'MyBrand' }, { host: 'beachxbums.com', title: 'MyBrand Official Site ᐉ MyBrand Login' }]));
     ok(!env3.calls.tg.some((m) => m.includes('Нові дропи')), '12.7 dropAlerts=false suppresses drop alerts (marker drop present but muted)');
   }
 

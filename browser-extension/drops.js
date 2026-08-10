@@ -51,15 +51,51 @@ function isGambling(host) {
   return GAMBLING.some((t) => h.includes(t)) || GAMBLING_BOUNDED.test(h);
 }
 
-// The tell-tale marker drops put in their SERP <title> — e.g.
-// "Vipsta Sitio Oficial ᐉ Vipsta Acceso". This ᐉ (U+1409) is the PRECISE drop
-// signal: a top-10 result whose title carries it is a drop, so ads / reviews /
-// random competitor sites are no longer mistaken for drops. Extendable list —
-// add a glyph here if you spot drops using a different one.
+// Drops share a stencil SERP <title>:  "<Brand> <Official Site> ᐉ <Brand> <Login>"
+// (localized), e.g. "Casea Official Site ᐉ Casea Login" / "Vipsta Sitio Oficial ᐉ
+// Vipsta Acceso". The ᐉ (U+1409) marker alone is NOT enough — some legit sites
+// use it too — so a title counts as a drop only when it also matches ONE
+// structural signal of the stencil (see isDropTitle). Extendable marker list.
 const DROP_MARKERS = ['ᐉ']; // ᐉ CANADIAN SYLLABICS PWO
 function hasMarker(title) {
   const t = String(title || '');
   return DROP_MARKERS.some((m) => t.includes(m));
+}
+
+// Localized "Official (site)" and "Login / Access" vocabulary used in the stencil
+// (EN/ES/PT/IT/FR/GR + a few more). Tested against a lower-cased title.
+const OFFICIAL_RE = /(official|oficial|officiel|ufficiale|offiziell|oficjaln|επίσημ)/;
+const ACCESS_RE = /(login|log[\s-]?in|acc[eè]s|acess|entrar|entrada|acessar|connexion|είσοδ|anmeld|inloggen|ingresar)/;
+const firstToken = (s) => {
+  const m = String(s || '').toLowerCase().match(/[a-z0-9]+/);
+  return m ? m[0] : '';
+};
+
+// Is this SERP title a drop? Requires the ᐉ marker AND at least one structural
+// signal of the copy-paste stencil, so a random site that merely uses ᐉ is not
+// flagged. `brand` (the tracked keyword/site) sharpens signal 2 when known.
+function isDropTitle(title, brand) {
+  const t = String(title || '');
+  const marker = DROP_MARKERS.find((m) => t.includes(m));
+  if (!marker) return false; // the ᐉ marker is required
+  const i = t.indexOf(marker);
+  const left = t.slice(0, i);
+  const right = t.slice(i + marker.length);
+  const tl = t.toLowerCase();
+
+  // 1) The same token repeats right around the marker — the brand copied on both
+  //    sides ("Casea … ᐉ Casea …"). Strongest, self-contained signal.
+  const lt = firstToken(left);
+  if (lt && lt.length >= 2 && lt === firstToken(right)) return true;
+
+  // 2) The tracked brand appears on BOTH sides of the marker.
+  const b = firstToken(brand);
+  if (b && b.length >= 2 && left.toLowerCase().includes(b) && right.toLowerCase().includes(b)) return true;
+
+  // 3) The localized "official … login/access" stencil phrases are both present.
+  if (OFFICIAL_RE.test(tl) && ACCESS_RE.test(tl)) return true;
+
+  return false;
 }
 
 // ---- Active-brand watchlist (the only thing you maintain) -------------------
@@ -280,12 +316,12 @@ const KIND = {
 const isDropKind = (kind) => kind === 'drop';
 
 // Classify a SERP row. Priority: your own target → your other tracked site →
-// a DROP (title carries the ᐉ marker) → mainstream aggregator → a gambling
+// a DROP (title matches the ᐉ stencil) → mainstream aggregator → a gambling
 // result (competitor casino) → otherwise just another site (ad / review / etc.).
 function classify(x, c) {
   if (hostMatches(x.host, c.domain)) return 'you';
   if (x.own) return 'own';
-  if (hasMarker(x.title)) return 'drop'; // ᐉ marker — the precise drop signal
+  if (isDropTitle(x.title, c.keyword || c.site)) return 'drop'; // ᐉ stencil — precise drop signal
   if (isNoise(x.host)) return 'noise';
   if (isGambling(x.host)) return 'comp';
   return 'other';

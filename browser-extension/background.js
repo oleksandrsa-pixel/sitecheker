@@ -63,17 +63,36 @@ const NOISE = [
 const isNoise = (host) => NOISE.some((n) => matchHost(host, n));
 const isOwn = (host, ownDomains) => (ownDomains || []).some((d) => matchHost(host, d));
 
-// Drop detection (mirror of drops.js): a top-10 result is a drop when its SERP
-// <title> carries the tell-tale ᐉ marker (U+1409) — e.g. "Vipsta Sitio Oficial
-// ᐉ Vipsta Acceso" — and it isn't one of your own tracked sites. Precise signal,
-// so ads / reviews / competitor sites are not mistaken for drops. Extendable.
+// Drop detection (mirror of drops.js). Drops share a stencil SERP <title>:
+// "<Brand> Official Site ᐉ <Brand> Login" (localized), e.g. "Casea Official Site
+// ᐉ Casea Login". The ᐉ (U+1409) marker alone is not enough — some legit sites
+// use it — so a title counts as a drop only when it ALSO matches one structural
+// signal of the stencil (brand repeated around the marker / on both sides, or the
+// localized official+login phrases). `brand` = the tracked keyword.
 const DROP_MARKERS = ['ᐉ']; // ᐉ CANADIAN SYLLABICS PWO
-const hasMarker = (title) => {
-  const t = String(title || '');
-  return DROP_MARKERS.some((m) => t.includes(m));
+const OFFICIAL_RE = /(official|oficial|officiel|ufficiale|offiziell|oficjaln|επίσημ)/;
+const ACCESS_RE = /(login|log[\s-]?in|acc[eè]s|acess|entrar|entrada|acessar|connexion|είσοδ|anmeld|inloggen|ingresar)/;
+const firstToken = (s) => {
+  const m = String(s || '').toLowerCase().match(/[a-z0-9]+/);
+  return m ? m[0] : '';
 };
-const isDrop = (entry, ownDomains) =>
-  hasMarker(entry && entry.title) && !isOwn(entry && entry.host, ownDomains);
+function isDropTitle(title, brand) {
+  const t = String(title || '');
+  const marker = DROP_MARKERS.find((m) => t.includes(m));
+  if (!marker) return false; // the ᐉ marker is required
+  const i = t.indexOf(marker);
+  const left = t.slice(0, i);
+  const right = t.slice(i + marker.length);
+  const tl = t.toLowerCase();
+  const lt = firstToken(left);
+  if (lt && lt.length >= 2 && lt === firstToken(right)) return true; // brand copied around marker
+  const b = firstToken(brand);
+  if (b && b.length >= 2 && left.toLowerCase().includes(b) && right.toLowerCase().includes(b)) return true;
+  if (OFFICIAL_RE.test(tl) && ACCESS_RE.test(tl)) return true; // official + login stencil
+  return false;
+}
+const isDrop = (entry, ownDomains, brand) =>
+  isDropTitle(entry && entry.title, brand) && !isOwn(entry && entry.host, ownDomains);
 
 // The active-brand watchlist (dropWatch) is a full target list (Domain, keyword,
 // GEO) — same shape as sweepTargets — so the active sweep can check every
@@ -371,9 +390,10 @@ async function maybeAlertDrops(s, result) {
   if (!domains.some((d) => matchHost(result.domain, d))) return; // this brand isn't active
 
   const ownDomains = (s.targets || []).map((t) => t.domain);
+  const brand = result.keyword || result.site;
   const currentDrops = (result.topResults || [])
     .slice(0, 10)
-    .filter((x) => isDrop(x, ownDomains));
+    .filter((x) => isDrop(x, ownDomains, brand));
   const currentHosts = currentDrops.map((x) => registrable(x.host));
 
   const key = `${result.domain}|${result.keyword}|${result.gl}`;

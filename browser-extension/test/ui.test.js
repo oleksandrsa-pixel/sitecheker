@@ -434,7 +434,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
-  section('K. drops.js — ᐉ-marker drop detection, active-brand watchlist, copyable URLs');
+  section('K. drops.js — ᐉ-stencil drop detection, active-brand watchlist, copyable URLs');
   {
     const now = new Date().toISOString();
     const storage = makeStorage({
@@ -444,12 +444,12 @@ async function main() {
           site: 'Zoccer', keyword: 'zoccer', geo: 'Spain', gl: 'es', domain: 'zoccer-online-casino.com',
           position: 2, error: null, checkedAt: now,
           serpTop: [
-            { position: 1, host: 'beachxbums.com', url: 'https://beachxbums.com/x', title: 'Zoccer Sitio Oficial ᐉ Zoccer Acceso', own: false }, // DROP (ᐉ marker)
+            { position: 1, host: 'beachxbums.com', url: 'https://beachxbums.com/x', title: 'Zoccer Official Site ᐉ Zoccer Login', own: false }, // DROP (stencil)
             { position: 2, host: 'zoccer-online-casino.com', url: 'https://zoccer-online-casino.com/es-es/', title: 'Zoccer', own: true }, // you
             { position: 3, host: 'trustpilot.com', url: 'https://trustpilot.com/review/zoccer', title: 'Reviews', own: false }, // noise
             { position: 4, host: 'megaslots-casino.com', url: 'https://megaslots-casino.com/', title: 'MegaSlots', own: false }, // comp
-            { position: 5, host: 'hanami-sushi.it', url: 'https://hanami-sushi.it/', title: 'Zoccer ᐉ Bonus', own: false }, // DROP (ᐉ marker)
-            { position: 6, host: 'someblog-review.com', url: 'https://someblog-review.com/', title: 'Top 10 casinos review', own: false }, // other (off-topic, NO marker)
+            { position: 5, host: 'hanami-sushi.it', url: 'https://hanami-sushi.it/', title: 'Zoccer Sitio Oficial ᐉ Zoccer Acceso', own: false }, // DROP (stencil, localized)
+            { position: 6, host: 'someblog-review.com', url: 'https://someblog-review.com/', title: 'Top 10 Casinos 2024 ᐉ Best Bonuses', own: false }, // has ᐉ but NOT a stencil -> other
           ],
         },
         'b.com|b|fr': { site: 'B', keyword: 'b', geo: 'France', gl: 'fr', domain: 'b.com', position: null, error: null, checkedAt: now, serpTop: [] },
@@ -469,15 +469,15 @@ async function main() {
     const check = storage.store.lastChecks['zoccer-online-casino.com|zoccer|es'];
     const serp = ctx.buildSerp(check);
     ok(serp.find((x) => x.host === 'zoccer-online-casino.com').kind === 'you', 'K.1 own target classified as YOU');
-    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 title with ᐉ marker -> DROP');
-    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.3 second ᐉ-marked title -> DROP');
-    ok(serp.find((x) => x.host === 'someblog-review.com').kind === 'other', 'K.4 off-topic site WITHOUT the marker -> other (NOT a drop)');
+    ok(serp.find((x) => x.host === 'beachxbums.com').kind === 'drop', 'K.2 ᐉ stencil title -> DROP');
+    ok(serp.find((x) => x.host === 'hanami-sushi.it').kind === 'drop', 'K.3 localized ᐉ stencil title -> DROP');
+    ok(serp.find((x) => x.host === 'someblog-review.com').kind === 'other', 'K.4 has ᐉ but NOT a stencil -> other (the false-positive we fixed)');
     ok(serp.find((x) => x.host === 'trustpilot.com').kind === 'noise', 'K.5 aggregator classified as noise');
     ok(serp.find((x) => x.host === 'megaslots-casino.com').kind === 'comp', 'K.6 gambling domain -> competitor');
 
-    // marker detector — the precise drop signal (ᐉ in the SERP title)
-    ok(ctx.hasMarker('Vipsta Sitio Oficial ᐉ Vipsta Acceso'), 'K.7 hasMarker detects the ᐉ marker');
-    ok(!ctx.hasMarker('Plain casino review, no marker'), 'K.7b hasMarker is false without the marker');
+    // stencil detector: ᐉ + a structural signal (brand repeated / official+login)
+    ok(ctx.isDropTitle('Casea Official Site ᐉ Casea Login', 'casea') && ctx.isDropTitle('Vipsta Official Site ᐉ Vipsta Login', 'vipsta'), 'K.7 isDropTitle: real stencils -> true');
+    ok(!ctx.isDropTitle('Top 10 Casinos 2024 ᐉ Best Bonuses', 'casea') && !ctx.isDropTitle('Casea Casino Review ᐉ Bonus Codes', 'casea') && !ctx.isDropTitle('No marker here at all', 'casea'), 'K.7b isDropTitle: ᐉ-only / review / no-marker -> false');
 
     // the active-brand watchlist scopes the view to only watched brands
     const shown = ctx.view();
