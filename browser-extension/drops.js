@@ -468,7 +468,7 @@ function render() {
   const pendTxt = pendingCount ? ` · ще не перевірено: ${pendingCount}` : '';
   $('sub').textContent = WATCH_DOMAINS.length
     ? `${WATCH_DOMAINS.length} активних брендів · ${rows.length} запитів · знайдено дропів у топ-10: ${totalDrops}${pendTxt}`
-    : `усі сайти: ${rows.length} запитів · дропів: ${totalDrops} · ⬆ завантаж CSV активних брендів, щоб бачити лише їх`;
+    : `усі сайти: ${rows.length} запитів · дропів: ${totalDrops} · підключи Google Таблицю в popup, щоб бачити активні бренди`;
 
   if (!rows.length) {
     $('list').innerHTML = WATCH_DOMAINS.length
@@ -571,6 +571,7 @@ function applyWatch(targets, text) {
 }
 
 function saveWatch() {
+  if (!$('watchlist')) return; // watchlist editor removed from the drops page
   const text = $('watchlist').value;
   const targets = parseWatchTargets(text);
   // Guard: non-empty text that yields no domains (typo, or a sheet-sync summary)

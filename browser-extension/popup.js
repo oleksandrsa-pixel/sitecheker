@@ -644,6 +644,16 @@ $('csvfile').addEventListener('change', (e) => {
   reader.readAsText(file, 'utf-8');
 });
 
+// Remember whether the (often long) targets list is folded, across popup opens.
+if ($('resultsdd')) {
+  chrome.storage.local.get(['resultsCollapsed'], (v) => {
+    $('resultsdd').open = !v.resultsCollapsed;
+  });
+  $('resultsdd').addEventListener('toggle', () => {
+    chrome.storage.local.set({ resultsCollapsed: !$('resultsdd').open });
+  });
+}
+
 loadConfig();
 render();
 setInterval(render, 700);

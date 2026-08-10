@@ -90,6 +90,11 @@
     margin-bottom: 10px;
     min-height: 16px;
   }
+  summary.status { cursor: pointer; user-select: none; list-style: none; }
+  summary.status::-webkit-details-marker { display: none; }
+  summary.status::before { content: '▾ '; color: var(--muted); font-size: 10px; }
+  details#resultsdd:not([open]) summary.status::before { content: '▸ '; }
+  details#resultsdd:not([open]) summary.status { margin-bottom: 0; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -239,20 +244,21 @@
   <button id="export" class="btn btn-ghost" style="flex: 0.9">⭳ JSON</button>
 </div>
 
-<div id="status" class="status">—</div>
-
-<table id="results">
-  <thead>
-    <tr>
-      <th>Сайт</th>
-      <th>Кейворд</th>
-      <th>Гео</th>
-      <th>Поз.</th>
-      <th>Остання перевірка</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
+<details id="resultsdd" open>
+  <summary id="status" class="status">—</summary>
+  <table id="results">
+    <thead>
+      <tr>
+        <th>Сайт</th>
+        <th>Кейворд</th>
+        <th>Гео</th>
+        <th>Поз.</th>
+        <th>Остання перевірка</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</details>
 
 <details open>
   <summary>📣 Telegram-алерти + авто-прохід</summary>

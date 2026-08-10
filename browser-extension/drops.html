@@ -36,24 +36,6 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   label.chk { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
 
-  details.drops {
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    padding: 8px 12px; margin-bottom: 14px;
-  }
-  details.drops summary { cursor: pointer; font-weight: 600; color: var(--txt); outline: none; }
-  details.drops .hint { color: var(--muted); font-size: 12px; margin: 8px 0 6px; }
-  details.drops input[type='file'] {
-    display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px;
-  }
-  details.drops textarea {
-    width: 100%; height: 92px; background: #0d1020; color: var(--txt);
-    border: 1px solid var(--line); border-radius: 6px; padding: 8px;
-    font: 12px ui-monospace, Consolas, monospace; resize: vertical;
-  }
-  details.drops .row-btns { margin-top: 8px; display: flex; gap: 10px; align-items: center; }
-  details.drops button { background: var(--orange); border-color: var(--orange); color: #241206; font-weight: 600; }
-  #dropmsg { font-size: 12px; min-height: 14px; }
-
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 12px 14px; margin-bottom: 12px;
@@ -133,25 +115,6 @@
 
 <h1>🎯 Rank Peek — дропи</h1>
 <div class="sub" id="sub">—</div>
-
-<details class="drops" open>
-  <summary>🎯 Активні бренди (на які запускаєш дропи)</summary>
-  <p class="hint">
-    Завантаж <b>CSV</b> у тому самому форматі, що й загальний список сайтів:
-    <b>Domain, keyword, second keyword, GEO</b>. Вкладка перевірятиме <b>саме ці бренди</b> —
-    кожен за своїми ключами й гео (не лише ті, що є в основному списку) — і <b>сама</b> підсвітить
-    дропи в їх топ-10, вручну дропи вводити <b>не треба</b>. Дроп визначається <b>точно</b> за
-    символом <b>ᐉ</b> у заголовку (напр. «Vipsta Sitio Oficial ᐉ Vipsta Acceso»), тож
-    реклама/огляди/конкуренти не потрапляють у дропи. Після збереження натисни
-    <b>🎯 Прогін дропів</b> у popup, щоб перевірити всі одразу. Порожній список = усі сайти.
-  </p>
-  <input id="watchcsv" type="file" accept=".csv,text/csv" />
-  <textarea id="watchlist" spellcheck="false" placeholder="Domain,keyword,second keyword,GEO&#10;winnercasino-it.com,winner,winner casino,Italy&#10;twincasinos-pt.com,twin,twin casino,Portugal"></textarea>
-  <div class="row-btns">
-    <button id="savewatch">Зберегти бренди</button>
-    <span id="watchmsg"></span>
-  </div>
-</details>
 
 <div class="toolbar">
   <input id="q" type="search" placeholder="Пошук: сайт, кейворд, гео, домен…" />
