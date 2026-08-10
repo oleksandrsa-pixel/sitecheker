@@ -547,6 +547,33 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
+  section('KE. drops.js — plain ▶ Прохід does NOT populate the tab without a sheet');
+  {
+    const storage = makeStorage({
+      dropWatch: [], // no Google Sheet connected
+      sheetDrops: {},
+      lastChecks: {
+        'gambivacasino.it|gambiva|it': {
+          site: 'Gambiva', keyword: 'gambiva', geo: 'Italy', gl: 'it', domain: 'gambivacasino.it',
+          position: 2, error: null, checkedAt: new Date().toISOString(),
+          serpTop: [{ position: 1, host: 'urbanloop.it', url: 'https://urbanloop.it/', title: 'Gambiva Official Site ᐉ Gambiva Login', own: false }],
+        },
+      },
+    });
+    const ctx = loadFile('drops.js', {
+      chrome: { storage: { local: storage.local } },
+      document: makeDocument(),
+      navigator: {},
+      setInterval: () => 0,
+      clearInterval: () => 0,
+      setTimeout: () => 0,
+      location: { href: 'chrome-extension://test/drops.html' },
+    });
+    await flush();
+    ok(ctx.view().length === 0, 'KE.1 no sheet connected -> a regular sweep result is NOT shown in Дропи');
+  }
+
+  // ---------------------------------------------------------------------
   section('RY. report yesterday mode (positions ~24h ago)');
   {
     const nowMs = Date.now();

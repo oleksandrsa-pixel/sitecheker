@@ -420,7 +420,7 @@ function loadData() {
 
 function populateGeo() {
   const prev = $('geo').value; // keep the user's selection across reloads / refresh
-  const pool = WATCH_DOMAINS.length ? ROWS.filter((r) => inWatch(r.domain)) : ROWS;
+  const pool = WATCH_DOMAINS.length ? ROWS.filter((r) => inWatch(r.domain)) : [];
   const geos = [...new Set(pool.map((r) => r.geo).filter(Boolean))].sort();
   $('geo').innerHTML =
     '<option value="">Усі гео</option>' +
@@ -433,7 +433,9 @@ function view() {
   const geo = $('geo').value;
   const onlydrops = $('onlydrops').checked;
   return ROWS.filter((r) => {
-    if (WATCH_DOMAINS.length && !inWatch(r.domain)) return false; // scope to active brands
+    // Drops tab is ONLY the active brands from the Google Sheet. No sheet
+    // connected -> nothing here (a plain ▶ Прохід must not dump sites in here).
+    if (!WATCH_DOMAINS.length || !inWatch(r.domain)) return false;
     if (geo && r.geo !== geo) return false;
     if (onlydrops && r.drops === 0) return false;
     if (!q) return true;
@@ -468,14 +470,12 @@ function render() {
   const pendTxt = pendingCount ? ` · ще не перевірено: ${pendingCount}` : '';
   $('sub').textContent = WATCH_DOMAINS.length
     ? `${WATCH_DOMAINS.length} активних брендів · ${rows.length} запитів · знайдено дропів у топ-10: ${totalDrops}${pendTxt}`
-    : `усі сайти: ${rows.length} запитів · дропів: ${totalDrops} · підключи Google Таблицю в popup, щоб бачити активні бренди`;
+    : 'тут лише активні бренди з Google Таблиці · підключи таблицю в popup і натисни 🎯 Прогін дропів';
 
   if (!rows.length) {
     $('list').innerHTML = WATCH_DOMAINS.length
       ? '<div class="empty">Список активних брендів збережено, але даних ще нема. Натисни <b>🎯 Прогін дропів</b> у popup — і результати зʼявляться тут.</div>'
-      : (ROWS.length
-        ? '<div class="empty">Нічого не знайдено за фільтром.</div>'
-        : '<div class="empty">Нема даних. Зроби прохід у розширенні (▶ Прохід), тоді онови цю сторінку.</div>');
+      : '<div class="empty">Тут показуються <b>лише активні бренди з Google Таблиці</b> (позначені <b>*</b>). Підключи таблицю в popup → 🎯 Прогін дропів. Звичайний ▶ Прохід сюди нічого не додає.</div>';
     return;
   }
   $('list').innerHTML = rows
