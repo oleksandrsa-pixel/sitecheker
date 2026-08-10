@@ -72,6 +72,7 @@ function makeEnv() {
     notifications: [],
     ingest: [],
     tg: [], // telegram message texts
+    sheets: [], // Google Sheets API urls hit
   };
 
   const local = {
@@ -159,6 +160,14 @@ function makeEnv() {
   };
 
   async function fetchMock(url, opts) {
+    if (/sheets\.googleapis\.com/.test(url)) {
+      calls.sheets.push(url);
+      const sd = store.__sheet || { titles: [], grids: {} };
+      if (/\/values:batchGet/.test(url)) {
+        return { ok: true, json: async () => ({ valueRanges: sd.titles.map((t) => ({ values: sd.grids[t] || [] })) }) };
+      }
+      return { ok: true, json: async () => ({ sheets: sd.titles.map((t) => ({ properties: { title: t } })) }) };
+    }
     if (/api\.telegram\.org/.test(url)) {
       let body = {};
       try {
@@ -812,6 +821,76 @@ async function main() {
     env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:testTg' }, {}, (r) => { emptyResp = r; }));
     await flush();
     ok(emptyResp && emptyResp.ok === false, '16.3 empty token/chat_id -> {ok:false}');
+  }
+
+  // ---------------------------------------------------------------------
+  section('17. Google Sheet sync: tabs -> active-brand drops (exact domains)');
+  {
+    const env = makeEnv();
+    const ctx = loadBackground(env);
+
+    const H = ['domain', 'brand', 'Type', 'geo'];
+    // parseSheetGrids directly: "+"-in-name tab active; plain tab inactive; flag-column tab partial
+    const titles = ['Gamblerina FR +', '20bet IT', 'hahaspin ES'];
+    const grids = {
+      'Gamblerina FR +': [H, ['meuse-internet.fr', 'Gamblerina', 'monobrand', 'FR'], ['carpes-koi.fr', 'Gamblerina', 'monobrand', 'FR']],
+      '20bet IT': [H, ['somedrop.it', '20bet', 'monobrand', 'IT']], // no "+" -> skipped
+      'hahaspin ES': [['domain', 'brand', 'Type', 'geo', 'check'], ['drop1.es', 'Hahaspin', 'monobrand', 'ES', '+'], ['drop2.es', 'Hahaspin', 'monobrand', 'ES', '']],
+    };
+    const parsed = ctx.parseSheetGrids(titles, titles.map((t) => ({ values: grids[t] })));
+    ok(parsed.targets.length === 2, '17.1 two active projects (Gamblerina FR + Hahaspin ES; 20bet IT skipped)', String(parsed.targets.length));
+    const gam = parsed.targets.find((t) => t.site === 'Gamblerina');
+    ok(gam && gam.gl === 'fr' && gam.keyword === 'Gamblerina' && gam.source === 'sheet', '17.2 project target has brand keyword + gl + source=sheet');
+    ok(parsed.drops[gam.domain].length === 2 && parsed.drops[gam.domain].includes('meuse-internet.fr'), '17.3 exact drop domains captured per project');
+    const hah = parsed.targets.find((t) => t.site === 'Hahaspin');
+    ok(hah && parsed.drops[hah.domain].length === 1 && parsed.drops[hah.domain][0] === 'drop1.es', '17.4 flag column: only "+"-marked row active');
+    ok(!parsed.targets.some((t) => t.site === '20bet'), '17.5 tab without "+" not tracked');
+
+    // full syncSheet flow via the API mock + rankpeek:syncSheet
+    env.store.__sheet = { titles, grids };
+    env.store.sheetId = 'https://docs.google.com/spreadsheets/d/ABC123456789012345678901/edit';
+    env.store.sheetApiKey = 'AIzaTESTKEY';
+    const fire = makeDriver(env);
+    let resp;
+    env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:syncSheet' }, {}, (r) => { resp = r; }));
+    await flush();
+    ok(resp && resp.ok && resp.projects === 2 && resp.drops === 3, '17.6 syncSheet ok: 2 projects, 3 drops', JSON.stringify(resp));
+    ok(Array.isArray(env.store.dropWatch) && env.store.dropWatch.length === 2, '17.7 dropWatch populated from the sheet');
+    ok(env.store.sheetDrops && Object.keys(env.store.sheetDrops).length === 2, '17.8 sheetDrops (exact domains) stored');
+
+    // no API key -> clear error, no crash
+    const env2 = makeEnv();
+    loadBackground(env2);
+    env2.store.sheetId = 'ABC123456789012345678901';
+    let resp2;
+    env2.listeners.message.forEach((fn) => fn({ type: 'rankpeek:syncSheet' }, {}, (r) => { resp2 = r; }));
+    await flush();
+    ok(resp2 && resp2.ok === false && /ключ/i.test(resp2.error || ''), '17.9 missing API key -> clear error');
+  }
+
+  // ---------------------------------------------------------------------
+  section('18. Exact known-drop alert (from the sheet) + no site-position spam');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    const fire = makeDriver(env);
+    // one sheet project: brand "Gamblerina" FR, known drop meuse-internet.fr
+    const pd = 'gamblerina.fr.drops';
+    env.store.sweepTargets = [{ site: 'Gamblerina', domain: pd, keyword: 'Gamblerina', gl: 'fr', hl: 'fr', geo: 'FR', source: 'sheet' }];
+    env.store.dropWatch = env.store.sweepTargets.slice();
+    env.store.sheetDrops = { [pd]: ['meuse-internet.fr'] };
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'CHAT';
+    env.store.digestEveryRun = false;
+
+    // SERP where the known drop ranks #3 (title has NO ᐉ stencil — pure exact match)
+    const serpFor = () => serp([
+      { host: 'superbet.fr' }, { host: 'somereview.fr' }, { host: 'meuse-internet.fr' }, { host: 'wikipedia.org' },
+    ]);
+    await runSweep(env, fire, serpFor);
+    const tg = env.calls.tg.slice();
+    ok(tg.some((m) => m.includes('Нові дропи') && m.includes('meuse-internet.fr')), '18.1 exact known drop alerted even without an ᐉ stencil');
+    ok(!tg.some((m) => m.includes('Випав із топ')), '18.2 sheet project does NOT trigger site-out-of-top alerts');
   }
 
   // done

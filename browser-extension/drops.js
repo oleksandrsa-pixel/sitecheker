@@ -313,12 +313,20 @@ const KIND = {
 };
 const isDropKind = (kind) => kind === 'drop';
 
-// Classify a SERP row. Priority: your own target → your other tracked site →
-// a DROP (title matches the ᐉ stencil) → mainstream aggregator → a gambling
-// result (competitor casino) → otherwise just another site (ad / review / etc.).
+let SHEET_DROPS = {}; // { projectDomain: [exact drop hosts] } from the synced sheet
+
+const isKnownDrop = (host, c) => {
+  const known = (c && SHEET_DROPS[c.domain]) || [];
+  return known.some((d) => hostMatches(host, d));
+};
+
+// Classify a SERP row. Priority: your own target → your other tracked site → a
+// KNOWN drop (exact domain from the synced sheet) → a DROP (title matches the ᐉ
+// stencil) → mainstream aggregator → a gambling result (competitor) → other.
 function classify(x, c) {
   if (hostMatches(x.host, c.domain)) return 'you';
   if (x.own) return 'own';
+  if (isKnownDrop(x.host, c)) return 'drop'; // exact match to a drop domain from your sheet
   if (isDropTitle(x.title, c.keyword || c.site)) return 'drop'; // ᐉ stencil — precise drop signal
   if (isNoise(x.host)) return 'noise';
   if (isGambling(x.host)) return 'comp';
@@ -357,7 +365,8 @@ function loadWatch(cb) {
 }
 
 function loadData() {
-  chrome.storage.local.get(['lastChecks'], (v) => {
+  chrome.storage.local.get(['lastChecks', 'sheetDrops'], (v) => {
+    SHEET_DROPS = v.sheetDrops || {};
     ROWS = Object.values(v.lastChecks || {}).map((c) => {
       const serp = buildSerp(c);
       return {
@@ -366,6 +375,7 @@ function loadData() {
         geo: c.geo || (c.gl ? c.gl.toUpperCase() : ''),
         gl: c.gl,
         domain: c.domain,
+        source: c.source,
         position: c.position,
         error: c.error || null,
         checkedAt: c.checkedAt || '',
@@ -386,6 +396,7 @@ function loadData() {
         geo: t.geo || (t.gl ? t.gl.toUpperCase() : ''),
         gl: t.gl,
         domain: t.domain,
+        source: t.source,
         position: undefined,
         error: null,
         checkedAt: '',
@@ -479,7 +490,15 @@ function render() {
         : r.drops
           ? `<span class="dropcount">🎯 дропів: ${r.drops}</span>`
           : '<span class="dropcount zero">без дропів</span>';
+      // Drop-projects (from the sheet) have no single "my position" — show only
+      // the drop count + time; other rows keep the position pill.
       const posCell = r.pending ? '<span class="pill p-mid">⏳</span>' : myPill(r);
+      const me =
+        r.source === 'sheet'
+          ? (r.checkedAt ? `<span class="me"><span class="badge">${fmtTime(r.checkedAt)}</span></span>` : '')
+          : `<span class="me"><span class="lbl">моя позиція:</span> ${posCell}` +
+            (r.checkedAt ? ` <span class="badge">${fmtTime(r.checkedAt)}</span>` : '') +
+            '</span>';
       return (
         `<div class="card${r.pending ? ' pending' : ''}">` +
         '<div class="head">' +
@@ -487,9 +506,7 @@ function render() {
         `<span class="kw">«${esc(r.keyword)}»</span>` +
         `<span class="geo">${esc(r.geo)}</span>` +
         dropBadge +
-        `<span class="me"><span class="lbl">моя позиція:</span> ${posCell}` +
-        (r.checkedAt ? ` <span class="badge">${fmtTime(r.checkedAt)}</span>` : '') +
-        '</span>' +
+        me +
         '</div>' +
         `<div class="serp">${body}</div>` +
         '</div>'
@@ -555,7 +572,18 @@ function applyWatch(targets, text) {
 
 function saveWatch() {
   const text = $('watchlist').value;
-  applyWatch(parseWatchTargets(text), text);
+  const targets = parseWatchTargets(text);
+  // Guard: non-empty text that yields no domains (typo, or a sheet-sync summary)
+  // must NOT wipe the current watchlist. Only an empty box clears it.
+  if (text.trim() && !targets.length) {
+    if ($('watchmsg')) {
+      $('watchmsg').style.color = '#f87171';
+      $('watchmsg').textContent = 'Не знайдено доменів у тексті — список не змінено';
+      setTimeout(() => ($('watchmsg').textContent = ''), 3000);
+    }
+    return;
+  }
+  applyWatch(targets, text);
 }
 
 // ---- CSV export (full SERP, Excel-friendly) --------------------------------

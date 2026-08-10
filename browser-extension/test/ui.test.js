@@ -504,6 +504,49 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------
+  section('KD. drops.js — exact known-drop from the synced sheet');
+  {
+    const now = new Date().toISOString();
+    const pd = 'gamblerina.fr.drops';
+    const storage = makeStorage({
+      dropWatch: [{ site: 'Gamblerina', domain: pd, keyword: 'Gamblerina', gl: 'fr', hl: 'fr', geo: 'FR', source: 'sheet' }],
+      sheetDrops: { [pd]: ['meuse-internet.fr', 'carpes-koi.fr'] },
+      lastChecks: {
+        [`${pd}|Gamblerina|fr`]: {
+          site: 'Gamblerina', keyword: 'Gamblerina', geo: 'FR', gl: 'fr', domain: pd, source: 'sheet',
+          position: null, error: null, checkedAt: now,
+          serpTop: [
+            { position: 1, host: 'grandcasino.fr', url: 'https://grandcasino.fr/', title: 'Grand Casino FR', own: false }, // comp (gambling word)
+            { position: 2, host: 'meuse-internet.fr', url: 'https://meuse-internet.fr/', title: 'Meuse Internet — Accueil', own: false }, // EXACT known drop (no ᐉ)
+            { position: 3, host: 'wikipedia.org', url: 'https://wikipedia.org/x', title: 'Wiki', own: false }, // noise
+            { position: 4, host: 'randomblog.fr', url: 'https://randomblog.fr/', title: 'Random Blog', own: false }, // other
+          ],
+        },
+      },
+    });
+    const ctx = loadFile('drops.js', {
+      chrome: { storage: { local: storage.local } },
+      document: makeDocument(),
+      navigator: {},
+      setInterval: () => 0,
+      clearInterval: () => 0,
+      setTimeout: () => 0,
+      location: { href: 'chrome-extension://test/drops.html' },
+    });
+    await flush();
+    ctx.load && ctx.load();
+    await flush();
+
+    const check = storage.store.lastChecks[`${pd}|Gamblerina|fr`];
+    const serp = ctx.buildSerp(check);
+    ok(serp.find((x) => x.host === 'meuse-internet.fr').kind === 'drop', 'KD.1 exact drop domain from the sheet -> DROP (no ᐉ needed)');
+    ok(serp.find((x) => x.host === 'grandcasino.fr').kind === 'comp', 'KD.2 gambling domain -> competitor');
+    ok(serp.find((x) => x.host === 'randomblog.fr').kind === 'other', 'KD.3 unrelated site -> other');
+    const shown = ctx.view();
+    ok(shown.length === 1 && shown[0].drops === 1, 'KD.4 project shows exactly 1 exact drop');
+  }
+
+  // ---------------------------------------------------------------------
   section('RY. report yesterday mode (positions ~24h ago)');
   {
     const nowMs = Date.now();

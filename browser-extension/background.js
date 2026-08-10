@@ -114,6 +114,148 @@ function watchDomains(list) {
   return out;
 }
 
+// ---- Google Sheets sync (the "AutoDeploy" table) ---------------------------
+//
+// Reads the whole spreadsheet via the Sheets API (read-only key): every tab is a
+// project, columns Domain/brand/Type/geo, and each row's `domain` is an actual
+// drop domain deployed for that brand+geo. Auto-picks up new tabs and new rows.
+// A tab is checked when its NAME contains "+" OR a row has "+" in a flag column;
+// remove the "+" and it stops being tracked on the next sync. Output: dropWatch
+// targets (one per active brand+geo) + sheetDrops (exact drop domains per
+// project) so the SERP scan can match your drops EXACTLY.
+const DEFAULT_SHEET_SYNC_MIN = 30;
+const SHEET_FLAG_COLS = ['+', 'check', 'active', 'on', 'monitor', 'статус', 'перевіряти', 'моніторити', 'моніторинг'];
+const truthyFlag = (v) => /^(\+|x|✓|✔|1|yes|y|on|true|так|да)$/i.test(String(v || '').trim());
+
+const GEO_MAP = {
+  italy: { gl: 'it', hl: 'it' }, greece: { gl: 'gr', hl: 'el' }, portugal: { gl: 'pt', hl: 'pt' },
+  france: { gl: 'fr', hl: 'fr' }, spain: { gl: 'es', hl: 'es' }, germany: { gl: 'de', hl: 'de' },
+  brazil: { gl: 'br', hl: 'pt-BR' }, uk: { gl: 'uk', hl: 'en' }, 'united kingdom': { gl: 'uk', hl: 'en' },
+  poland: { gl: 'pl', hl: 'pl' }, netherlands: { gl: 'nl', hl: 'nl' }, austria: { gl: 'at', hl: 'de' },
+  switzerland: { gl: 'ch', hl: 'de' }, belgium: { gl: 'be', hl: 'fr' }, ireland: { gl: 'ie', hl: 'en' },
+  romania: { gl: 'ro', hl: 'ro' }, sweden: { gl: 'se', hl: 'sv' }, turkey: { gl: 'tr', hl: 'tr' },
+};
+function geoToGlHl(geo) {
+  const key = String(geo || '').trim().toLowerCase();
+  if (GEO_MAP[key]) return GEO_MAP[key];
+  if (/^[a-z]{2}$/.test(key)) return { gl: key, hl: key };
+  return { gl: 'us', hl: 'en' };
+}
+const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40) || 'x';
+
+function extractSheetId(s) {
+  const raw = String(s || '').trim();
+  const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) return m[1];
+  return /^[a-zA-Z0-9-_]{20,}$/.test(raw) ? raw : '';
+}
+function hostFromCell(v) {
+  const raw = String(v || '').trim();
+  if (!raw) return '';
+  const ws = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    return new URL(ws).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').replace(/^www\./, '').split('/')[0].toLowerCase();
+  }
+}
+
+// Turn the fetched tab grids into (targets, drops-per-project). Exposed for tests.
+function parseSheetGrids(titles, valueRanges) {
+  const targets = [];
+  const drops = {};
+  const seen = new Set();
+  let tabs = 0;
+  let activeTabs = 0;
+  let dropCount = 0;
+  for (let ti = 0; ti < titles.length; ti += 1) {
+    const title = String(titles[ti] || '');
+    tabs += 1;
+    const rows = (valueRanges[ti] && valueRanges[ti].values) || [];
+    if (rows.length < 2) continue;
+    const header = (rows[0] || []).map((h) => String(h || '').trim().toLowerCase());
+    const col = (aliases) => {
+      for (const a of aliases) { const i = header.indexOf(a); if (i >= 0) return i; }
+      return -1;
+    };
+    const iDom = col(['domain', 'url', 'website', 'site', 'link', 'дроп', 'drop']);
+    const iBrand = col(['brand', 'бренд', 'name']);
+    const iGeo = col(['geo', 'гео', 'country', 'location']);
+    const iFlag = col(SHEET_FLAG_COLS);
+    if (iDom < 0 || iBrand < 0) continue; // not a project tab
+    const tabActive = title.includes('+'); // whole tab on when its name carries "+"
+    let tabHasActive = false;
+    for (let r = 1; r < rows.length; r += 1) {
+      const row = rows[r] || [];
+      const dom = hostFromCell(row[iDom]);
+      if (!dom || !dom.includes('.')) continue;
+      const brand = String(row[iBrand] || '').trim();
+      if (!brand) continue;
+      const rowActive = tabActive || (iFlag >= 0 && truthyFlag(row[iFlag]));
+      if (!rowActive) continue;
+      tabHasActive = true;
+      const geo = iGeo >= 0 ? String(row[iGeo] || '').trim() : '';
+      const { gl, hl } = geoToGlHl(geo);
+      const pd = `${slug(brand)}.${gl}.drops`; // synthetic per-project key (never matches a real host)
+      if (!seen.has(pd)) {
+        seen.add(pd);
+        targets.push({ site: brand, domain: pd, keyword: brand, gl, hl, geo: geo || gl.toUpperCase(), source: 'sheet' });
+        drops[pd] = [];
+      }
+      if (!drops[pd].includes(dom)) { drops[pd].push(dom); dropCount += 1; }
+    }
+    if (tabHasActive) activeTabs += 1;
+  }
+  return { targets, drops, stats: { tabs, activeTabs, projects: targets.length, drops: dropCount } };
+}
+
+async function syncSheet(manual) {
+  const cfg = await chrome.storage.local.get(['sheetId', 'sheetApiKey', 'sheetSync']);
+  if (!manual && !cfg.sheetSync) return { ok: false, error: 'off' };
+  const id = extractSheetId(cfg.sheetId);
+  const key = String(cfg.sheetApiKey || '').trim();
+  if (!id) return { ok: false, error: 'вкажи посилання/ID таблиці' };
+  if (!key) return { ok: false, error: 'вкажи API-ключ' };
+
+  let meta;
+  try {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets(properties(title))&key=${encodeURIComponent(key)}`);
+    meta = await r.json().catch(() => null);
+    if (!r.ok || !meta || meta.error) return { ok: false, error: (meta && meta.error && meta.error.message) || `HTTP ${r.status}` };
+  } catch (e) {
+    return { ok: false, error: 'мережа: ' + ((e && e.message) || 'fetch failed') };
+  }
+  const titles = (meta.sheets || []).map((s) => s.properties && s.properties.title).filter(Boolean);
+  if (!titles.length) return { ok: false, error: 'у таблиці немає вкладок' };
+
+  let vals;
+  try {
+    const ranges = titles
+      .map((t) => `ranges=${encodeURIComponent(`'${t.replace(/'/g, "''")}'`)}`)
+      .join('&');
+    const r2 = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values:batchGet?${ranges}&majorDimension=ROWS&key=${encodeURIComponent(key)}`);
+    vals = await r2.json().catch(() => null);
+    if (!r2.ok || !vals || vals.error) return { ok: false, error: (vals && vals.error && vals.error.message) || `HTTP ${r2.status}` };
+  } catch (e) {
+    return { ok: false, error: 'мережа: ' + ((e && e.message) || 'fetch failed') };
+  }
+
+  const { targets, drops, stats } = parseSheetGrids(titles, vals.valueRanges || []);
+  const text =
+    `# Синхронізовано з Google Таблиці (${new Date().toISOString().slice(0, 16).replace('T', ' ')})\n` +
+    `# ${stats.activeTabs} активних вкладок · ${stats.projects} проєктів · ${stats.drops} дропів\n` +
+    targets.map((t) => `${t.site},${t.keyword},,${t.geo}  (дропів: ${(drops[t.domain] || []).length})`).join('\n');
+  await chrome.storage.local.set({
+    dropWatch: targets,
+    dropWatchText: text,
+    sheetDrops: drops,
+    sheetSyncAt: new Date().toISOString(),
+    sheetSyncStats: stats,
+    sheetSyncError: '',
+  });
+  return { ok: true, ...stats };
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Random jitter so gaps between queries never look mechanical (±35%).
@@ -319,6 +461,7 @@ function siteAggregate(lastChecks, sweepTargets, maxPos) {
   const sites = new Map();
   for (const c of Object.values(lastChecks || {})) {
     if (!c || !c.domain) continue;
+    if (c.source === 'sheet') continue; // drop-projects aren't "sites" with a rank
     const k = `${registrable(c.domain)}|${c.gl || ''}`;
     if (!sites.has(k)) {
       sites.set(k, {
@@ -354,6 +497,7 @@ function siteAggregate(lastChecks, sweepTargets, maxPos) {
 // keyword, stay silent. Baseline (first definitive status) never alerts.
 async function maybeAlertSite(s, result) {
   if (result.error) return; // a single keyword's technical failure isn't a drop
+  if (result.source === 'sheet') return; // drop-projects have no single "my position" to alert on
   const maxPos = s.alertMaxPos ?? 5;
   const data = await chrome.storage.local.get(['lastChecks', 'sweepTargets', 'siteStatus']);
   const key = `${registrable(result.domain)}|${result.gl}`;
@@ -388,7 +532,7 @@ async function maybeAlertSite(s, result) {
 async function maybeAlertDrops(s, result) {
   if (result.error) return;
   if (!s.telegramToken || !s.telegramChatId) return;
-  const data = await chrome.storage.local.get(['dropWatch', 'dropsSeen', 'dropAlerts']);
+  const data = await chrome.storage.local.get(['dropWatch', 'dropsSeen', 'dropAlerts', 'sheetDrops']);
   if (data.dropAlerts === false) return; // toggle, default ON
   const domains = watchDomains(data.dropWatch);
   if (!domains.length) return; // no active brands defined -> nothing to watch
@@ -396,9 +540,13 @@ async function maybeAlertDrops(s, result) {
 
   const ownDomains = (s.targets || []).map((t) => t.domain);
   const brand = result.keyword || result.site;
+  // Exact drop domains for this project from the synced sheet (if any) — matched
+  // directly in the SERP, no heuristic needed. Plus the ᐉ-stencil for unknowns.
+  const known = (data.sheetDrops && data.sheetDrops[result.domain]) || [];
+  const isKnown = (h) => known.some((d) => matchHost(h, d));
   const currentDrops = (result.topResults || [])
     .slice(0, 10)
-    .filter((x) => isDrop(x, ownDomains, brand));
+    .filter((x) => isKnown(x.host) || isDrop(x, ownDomains, brand));
   const currentHosts = currentDrops.map((x) => registrable(x.host));
 
   const key = `${result.domain}|${result.keyword}|${result.gl}`;
@@ -463,6 +611,7 @@ async function updateLastCheck(result, ownDomains = []) {
     geo: result.geo,
     domain: result.domain,
     gl: result.gl,
+    source: result.source,
     position: result.position,
     top1: result.error ? base.top1 ?? null : top1,
     serpTop: result.error ? base.serpTop || [] : serpTop,
@@ -551,10 +700,13 @@ async function applySchedule() {
     'dailyReportHour',
     'activeSweep',
     'activeSweepHours',
+    'sheetSync',
+    'sheetSyncMin',
   ]);
   await chrome.alarms.clear('schedule');
   await chrome.alarms.clear('dailyReport');
   await chrome.alarms.clear('activeSweep');
+  await chrome.alarms.clear('sheetSync');
 
   if (v.dripMode) {
     // 24/7 continuous drip — make sure a sweep is running (it self-restarts on
@@ -588,6 +740,14 @@ async function applySchedule() {
       periodInMinutes: ah * 60,
       delayInMinutes: ah * 60,
     });
+  }
+
+  // Auto re-read the Google Sheet on a schedule (picks up new tabs / rows / "+"
+  // marks). Fetch runs immediately once too, so a fresh sync lands right away.
+  if (v.sheetSync) {
+    const sm = Math.max(5, Number(v.sheetSyncMin) || DEFAULT_SHEET_SYNC_MIN);
+    await chrome.alarms.create('sheetSync', { periodInMinutes: sm, delayInMinutes: sm });
+    syncSheet().catch(() => {});
   }
 }
 
@@ -942,6 +1102,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           keyword: t.keyword,
           geo: t.geo,
           gl: t.gl,
+          source: t.source,
           position: found ? found.position : null,
           topResults: msg.payload.results.slice(0, 10),
           checkedOn: today(),
@@ -974,6 +1135,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg?.type === 'rankpeek:schedule') {
       await applySchedule();
       sendResponse?.({ ok: true });
+    } else if (msg?.type === 'rankpeek:syncSheet') {
+      const r = await syncSheet(true);
+      sendResponse?.(r);
     } else if (msg?.type === 'rankpeek:testTg') {
       const c = await chrome.storage.local.get(['telegramToken', 'telegramChatId']);
       const r = await telegramTest(c.telegramToken, c.telegramChatId);
@@ -1003,6 +1167,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     // never collides with (or interrupts) a full sweep.
     const s = await getSweep();
     if (!s || !s.running) await startSweep('active');
+  } else if (alarm.name === 'sheetSync') {
+    await syncSheet().catch(() => {});
   } else if (alarm.name === 'dailyReport') {
     await sendDailyDigest();
   } else if (alarm.name === 'next') {
@@ -1035,6 +1201,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         keyword: t.keyword,
         geo: t.geo,
         gl: t.gl,
+        source: t.source,
         position: null,
         topResults: [],
         error: 'timeout (no results — CAPTCHA/consent/blocked?)',

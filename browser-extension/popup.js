@@ -46,6 +46,10 @@ function loadConfig() {
       'dailyReportHour',
       'activeSweep',
       'activeSweepHours',
+      'sheetId',
+      'sheetApiKey',
+      'sheetSync',
+      'sheetSyncMin',
     ],
     (v) => {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
@@ -71,6 +75,10 @@ function loadConfig() {
       $('dailyhour').value = v.dailyReportHour != null ? v.dailyReportHour : 9;
       $('activesweep').checked = Boolean(v.activeSweep);
       $('activehours').value = v.activeSweepHours != null ? v.activeSweepHours : 2;
+      $('sheeturl').value = v.sheetId || '';
+      $('sheetkey').value = v.sheetApiKey || '';
+      $('sheetsync').checked = Boolean(v.sheetSync);
+      $('sheetmin').value = v.sheetSyncMin != null ? v.sheetSyncMin : 30;
     },
   );
 }
@@ -373,6 +381,44 @@ $('testtg').addEventListener('click', () => {
         $('tgmsg').style.color = '#dc2626';
         const err = resp?.error || 'невідома помилка';
         $('tgmsg').textContent = `Помилка: ${err}. ${tgHint(err)}`;
+      });
+    },
+  );
+});
+
+// ---- Google Sheet auto-sync ------------------------------------------------
+
+$('savesheet').addEventListener('click', () => {
+  const cfg = {
+    sheetId: $('sheeturl').value.trim(),
+    sheetApiKey: $('sheetkey').value.trim(),
+    sheetSync: $('sheetsync').checked,
+    sheetSyncMin: Math.max(5, Number($('sheetmin').value) || 30),
+  };
+  chrome.storage.local.set(cfg, () => {
+    chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm the sync alarm
+    $('sheetmsg').style.color = '#16a34a';
+    $('sheetmsg').textContent = cfg.sheetSync
+      ? `Збережено ✓ · авто кожні ${cfg.sheetSyncMin} хв`
+      : 'Збережено ✓ · авто-синхронізацію вимкнено';
+    setTimeout(() => ($('sheetmsg').textContent = ''), 3000);
+  });
+});
+
+$('syncsheet').addEventListener('click', () => {
+  chrome.storage.local.set(
+    { sheetId: $('sheeturl').value.trim(), sheetApiKey: $('sheetkey').value.trim() },
+    () => {
+      $('sheetmsg').style.color = '#555';
+      $('sheetmsg').textContent = 'Синхронізую…';
+      chrome.runtime.sendMessage({ type: 'rankpeek:syncSheet' }, (resp) => {
+        if (resp && resp.ok) {
+          $('sheetmsg').style.color = '#16a34a';
+          $('sheetmsg').textContent = `Готово ✓ ${resp.activeTabs} активних вкладок · ${resp.projects} проєктів · ${resp.drops} дропів`;
+        } else {
+          $('sheetmsg').style.color = '#dc2626';
+          $('sheetmsg').textContent = 'Помилка: ' + ((resp && resp.error) || 'перевір посилання / ключ / доступ');
+        }
       });
     },
   );

@@ -308,6 +308,34 @@
 </details>
 
 <details>
+  <summary>📊 Google Таблиця (авто-дропи)</summary>
+  <p class="hint">
+    Бот сам читає твою таблицю (усі вкладки, нові підхоплюються автоматично) і бере в роботу
+    проєкти, помічені <b>+</b> (у назві вкладки або в колонці-прапорці). Домени з таблиці —
+    це самі дропи, тож збіг у видачі шукається <b>точно</b>. Формат вкладки:
+    <code>domain, brand, Type, geo</code>.
+  </p>
+  <p class="hint">Посилання на таблицю (або ID):</p>
+  <input id="sheeturl" type="text" placeholder="https://docs.google.com/spreadsheets/d/…" />
+  <p class="hint">Google API-ключ (лише читання):</p>
+  <input id="sheetkey" type="text" placeholder="AIza…" />
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="sheetsync" type="checkbox" /> <b>Авто-синхронізація</b> кожні
+    <input id="sheetmin" type="number" min="5" step="5" value="30" style="width: 56px" /> хв
+  </label>
+  <p class="hint" style="margin-top: 6px">
+    Як отримати ключ: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com</a>
+    → створи проєкт → увімкни <b>Google Sheets API</b> → «Створити облікові дані» → <b>API key</b>.
+    Таблицю відкрий «Усі, хто має посилання — Читач». Ключ і таблиця залишаються у тебе.
+  </p>
+  <div class="row-btns">
+    <button id="savesheet">Зберегти + увімкнути</button>
+    <button id="syncsheet" class="sec">Синхронізувати зараз</button>
+  </div>
+  <div id="sheetmsg" class="msg"></div>
+</details>
+
+<details>
   <summary>📄 Список сайтів (CSV / JSON)</summary>
   <p class="hint">
     <b>Завантажити CSV.</b> Досить 4 колонок: <code>Domain,keyword,second keyword,GEO</code>.
