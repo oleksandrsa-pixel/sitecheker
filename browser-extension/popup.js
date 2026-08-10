@@ -50,6 +50,7 @@ function loadConfig() {
       'sheetApiKey',
       'sheetSync',
       'sheetSyncMin',
+      'sheetKwExtra',
     ],
     (v) => {
       const targets = validTargets(v.sweepTargets) ? v.sweepTargets : DEFAULT_TARGETS;
@@ -79,6 +80,7 @@ function loadConfig() {
       $('sheetkey').value = v.sheetApiKey || '';
       $('sheetsync').checked = Boolean(v.sheetSync);
       $('sheetmin').value = v.sheetSyncMin != null ? v.sheetSyncMin : 30;
+      $('sheetkw').value = v.sheetKwExtra !== undefined ? v.sheetKwExtra : 'casino';
     },
   );
 }
@@ -394,6 +396,7 @@ $('savesheet').addEventListener('click', () => {
     sheetApiKey: $('sheetkey').value.trim(),
     sheetSync: $('sheetsync').checked,
     sheetSyncMin: Math.max(5, Number($('sheetmin').value) || 30),
+    sheetKwExtra: $('sheetkw').value.trim(),
   };
   chrome.storage.local.set(cfg, () => {
     chrome.runtime.sendMessage({ type: 'rankpeek:schedule' }); // (re)arm the sync alarm
@@ -407,14 +410,18 @@ $('savesheet').addEventListener('click', () => {
 
 $('syncsheet').addEventListener('click', () => {
   chrome.storage.local.set(
-    { sheetId: $('sheeturl').value.trim(), sheetApiKey: $('sheetkey').value.trim() },
+    {
+      sheetId: $('sheeturl').value.trim(),
+      sheetApiKey: $('sheetkey').value.trim(),
+      sheetKwExtra: $('sheetkw').value.trim(),
+    },
     () => {
       $('sheetmsg').style.color = '#555';
       $('sheetmsg').textContent = 'Синхронізую…';
       chrome.runtime.sendMessage({ type: 'rankpeek:syncSheet' }, (resp) => {
         if (resp && resp.ok) {
           $('sheetmsg').style.color = '#16a34a';
-          $('sheetmsg').textContent = `Готово ✓ ${resp.activeTabs} активних вкладок · ${resp.projects} проєктів · ${resp.drops} дропів`;
+          $('sheetmsg').textContent = `Готово ✓ ${resp.activeTabs} вкладок · ${resp.projects} проєктів · ${resp.queries} запитів · ${resp.drops} дропів`;
         } else {
           $('sheetmsg').style.color = '#dc2626';
           $('sheetmsg').textContent = 'Помилка: ' + ((resp && resp.error) || 'перевір посилання / ключ / доступ');

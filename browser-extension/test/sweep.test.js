@@ -838,10 +838,15 @@ async function main() {
       'hahaspin ES': [['domain', 'brand', 'Type', 'geo', 'check'], ['drop1.es', 'Hahaspin', 'monobrand', 'ES', '+'], ['drop2.es', 'Hahaspin', 'monobrand', 'ES', '']],
     };
     const parsed = ctx.parseSheetGrids(titles, titles.map((t) => ({ values: grids[t] })));
-    ok(parsed.targets.length === 2, '17.1 two active projects (Gamblerina FR + Hahaspin ES; 20bet IT skipped)', String(parsed.targets.length));
-    const gam = parsed.targets.find((t) => t.site === 'Gamblerina');
-    ok(gam && gam.gl === 'fr' && gam.keyword === 'Gamblerina' && gam.source === 'sheet', '17.2 project target has brand keyword + gl + source=sheet');
-    ok(parsed.drops[gam.domain].length === 2 && parsed.drops[gam.domain].includes('meuse-internet.fr'), '17.3 exact drop domains captured per project');
+    // 2 active projects × 2 queries each (brand + "brand casino"); 20bet IT skipped
+    ok(parsed.targets.length === 4 && parsed.stats.projects === 2, '17.1 two active projects, two queries each', String(parsed.targets.length));
+    const gam = parsed.targets.filter((t) => t.site === 'Gamblerina');
+    ok(gam.length === 2 && gam.some((t) => t.keyword === 'Gamblerina') && gam.some((t) => t.keyword === 'Gamblerina casino'), '17.2a queries = «brand» + «brand casino»');
+    ok(gam[0].gl === 'fr' && gam[0].source === 'sheet', '17.2b project target has gl + source=sheet');
+    ok(parsed.drops[gam[0].domain].length === 2 && parsed.drops[gam[0].domain].includes('meuse-internet.fr'), '17.3 exact drop domains captured per project');
+    // extra='' -> brand only
+    const bare = ctx.parseSheetGrids(titles, titles.map((t) => ({ values: grids[t] })), '');
+    ok(bare.targets.length === 2 && bare.targets.every((t) => !/ casino$/.test(t.keyword)), '17.3b empty extra -> brand-only query');
     const hah = parsed.targets.find((t) => t.site === 'Hahaspin');
     ok(hah && parsed.drops[hah.domain].length === 1 && parsed.drops[hah.domain][0] === 'drop1.es', '17.4 flag column: only "+"-marked row active');
     ok(!parsed.targets.some((t) => t.site === '20bet'), '17.5 tab without "+" not tracked');
@@ -854,8 +859,8 @@ async function main() {
     let resp;
     env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:syncSheet' }, {}, (r) => { resp = r; }));
     await flush();
-    ok(resp && resp.ok && resp.projects === 2 && resp.drops === 3, '17.6 syncSheet ok: 2 projects, 3 drops', JSON.stringify(resp));
-    ok(Array.isArray(env.store.dropWatch) && env.store.dropWatch.length === 2, '17.7 dropWatch populated from the sheet');
+    ok(resp && resp.ok && resp.projects === 2 && resp.queries === 4 && resp.drops === 3, '17.6 syncSheet ok: 2 projects, 4 queries, 3 drops', JSON.stringify(resp));
+    ok(Array.isArray(env.store.dropWatch) && env.store.dropWatch.length === 4, '17.7 dropWatch populated (2 projects × 2 queries)');
     ok(env.store.sheetDrops && Object.keys(env.store.sheetDrops).length === 2, '17.8 sheetDrops (exact domains) stored');
 
     // no API key -> clear error, no crash

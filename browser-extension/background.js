@@ -161,7 +161,11 @@ function hostFromCell(v) {
 }
 
 // Turn the fetched tab grids into (targets, drops-per-project). Exposed for tests.
-function parseSheetGrids(titles, valueRanges) {
+// Each active project becomes one target PER search query: the bare brand plus
+// "<brand> <extra>" (extra defaults to "casino"; pass '' to search brand only).
+function parseSheetGrids(titles, valueRanges, extra) {
+  const ex = extra === undefined ? 'casino' : String(extra || '').trim();
+  const keywordsFor = (brand) => (ex ? [brand, `${brand} ${ex}`] : [brand]);
   const targets = [];
   const drops = {};
   const seen = new Set();
@@ -199,18 +203,19 @@ function parseSheetGrids(titles, valueRanges) {
       const pd = `${slug(brand)}.${gl}.drops`; // synthetic per-project key (never matches a real host)
       if (!seen.has(pd)) {
         seen.add(pd);
-        targets.push({ site: brand, domain: pd, keyword: brand, gl, hl, geo: geo || gl.toUpperCase(), source: 'sheet' });
+        const base = { site: brand, domain: pd, gl, hl, geo: geo || gl.toUpperCase(), source: 'sheet' };
+        for (const kw of keywordsFor(brand)) targets.push({ ...base, keyword: kw });
         drops[pd] = [];
       }
       if (!drops[pd].includes(dom)) { drops[pd].push(dom); dropCount += 1; }
     }
     if (tabHasActive) activeTabs += 1;
   }
-  return { targets, drops, stats: { tabs, activeTabs, projects: targets.length, drops: dropCount } };
+  return { targets, drops, stats: { tabs, activeTabs, projects: seen.size, queries: targets.length, drops: dropCount } };
 }
 
 async function syncSheet(manual) {
-  const cfg = await chrome.storage.local.get(['sheetId', 'sheetApiKey', 'sheetSync']);
+  const cfg = await chrome.storage.local.get(['sheetId', 'sheetApiKey', 'sheetSync', 'sheetKwExtra']);
   if (!manual && !cfg.sheetSync) return { ok: false, error: 'off' };
   const id = extractSheetId(cfg.sheetId);
   const key = String(cfg.sheetApiKey || '').trim();
@@ -240,10 +245,11 @@ async function syncSheet(manual) {
     return { ok: false, error: 'мережа: ' + ((e && e.message) || 'fetch failed') };
   }
 
-  const { targets, drops, stats } = parseSheetGrids(titles, vals.valueRanges || []);
+  const extra = cfg.sheetKwExtra === undefined ? 'casino' : cfg.sheetKwExtra;
+  const { targets, drops, stats } = parseSheetGrids(titles, vals.valueRanges || [], extra);
   const text =
     `# Синхронізовано з Google Таблиці (${new Date().toISOString().slice(0, 16).replace('T', ' ')})\n` +
-    `# ${stats.activeTabs} активних вкладок · ${stats.projects} проєктів · ${stats.drops} дропів\n` +
+    `# ${stats.activeTabs} активних вкладок · ${stats.projects} проєктів · ${stats.queries} запитів · ${stats.drops} дропів\n` +
     targets.map((t) => `${t.site},${t.keyword},,${t.geo}  (дропів: ${(drops[t.domain] || []).length})`).join('\n');
   await chrome.storage.local.set({
     dropWatch: targets,
