@@ -358,8 +358,8 @@ function tgHint(err) {
     return 'Спершу відкрий свого бота в Telegram і натисни Start — бот не може написати першим.';
   }
   if (e.includes('blocked')) return 'Ти заблокував бота — розблокуй його в Telegram.';
-  if (e.includes('unauthorized') || e.includes('http 401') || e.includes('http 404')) {
-    return 'Невірний Bot token — скопіюй його заново з @BotFather (без пробілів).';
+  if (e.includes('token невірн') || e.includes('unauthorized') || e.includes('http 401') || e.includes('http 404')) {
+    return 'Скопіюй Bot token заново з @BotFather — без пробілів і без слова «bot» на початку.';
   }
   if (e.includes('мереж')) return 'Перевір інтернет / VPN — можливо, Telegram недоступний у твоїй мережі.';
   return 'Перевір Bot token і chat_id.';
@@ -375,6 +375,13 @@ $('testtg').addEventListener('click', () => {
       $('tgmsg').style.color = '#555';
       $('tgmsg').textContent = 'Надсилаю…';
       chrome.runtime.sendMessage({ type: 'rankpeek:testTg' }, (resp) => {
+        if (chrome.runtime.lastError) {
+          $('tgmsg').style.color = '#dc2626';
+          $('tgmsg').textContent =
+            `Фонова служба не відповіла (${chrome.runtime.lastError.message}). ` +
+            'Відкрий chrome://extensions → натисни ↻ на картці Rank Peek і спробуй ще.';
+          return;
+        }
         if (resp?.ok) {
           $('tgmsg').style.color = '#16a34a';
           $('tgmsg').textContent = 'Надіслано ✓ — перевір Telegram';

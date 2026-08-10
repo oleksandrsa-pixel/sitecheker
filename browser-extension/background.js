@@ -374,6 +374,19 @@ async function sendTelegram(token, chatId, text) {
 // never pressed Start in the bot, or the chat_id is wrong.
 async function telegramTest(token, chatId) {
   if (!token || !chatId) return { ok: false, error: 'Порожній token або chat_id' };
+  // Step 1 — is the TOKEN itself valid? getMe needs only the token, so this
+  // separates "wrong token" from "wrong chat_id" (both often "look correct").
+  try {
+    const rm = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const me = await rm.json().catch(() => null);
+    if (!me || !me.ok) {
+      const d = (me && me.description) || `HTTP ${rm.status}`;
+      return { ok: false, error: `Bot token невірний (${d})` };
+    }
+  } catch (e) {
+    return { ok: false, error: 'мережа: не вдалося зʼєднатися з api.telegram.org (' + ((e && e.message) || 'fetch failed') + ')' };
+  }
+  // Step 2 — token is fine, so any failure below is about the chat_id.
   let res;
   try {
     res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
