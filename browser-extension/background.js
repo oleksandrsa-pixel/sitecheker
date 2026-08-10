@@ -188,7 +188,12 @@ function parseSheetGrids(titles, valueRanges, extra) {
     const iGeo = col(['geo', 'гео', 'country', 'location']);
     const iFlag = col(SHEET_FLAG_COLS);
     if (iDom < 0 || iBrand < 0) continue; // not a project tab
-    const tabActive = title.includes('*'); // whole tab on when its name carries "*"
+    // Whole tab is ON when its NAME carries "*", OR — when there's no dedicated
+    // flag column — a lone "*" sits in ANY cell of the tab ("just put a * on the
+    // sheet"). With a real flag column, selection stays per-row instead.
+    const starAnywhere =
+      iFlag < 0 && rows.some((row) => (row || []).some((cell) => String(cell || '').trim() === '*'));
+    const tabActive = title.includes('*') || starAnywhere;
     let tabHasActive = false;
     for (let r = 1; r < rows.length; r += 1) {
       const row = rows[r] || [];

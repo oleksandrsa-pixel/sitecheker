@@ -851,6 +851,15 @@ async function main() {
     ok(hah && parsed.drops[hah.domain].length === 1 && parsed.drops[hah.domain][0] === 'drop1.es', '17.4 flag column: only "*"-marked row active');
     ok(!parsed.targets.some((t) => t.site === '20bet'), '17.5 tab without "*" not tracked');
 
+    // "*" in ANY cell (no flag column, no "*" in the tab name) turns the WHOLE tab on
+    const starTitles = ['netbet FR'];
+    const starGrids = {
+      'netbet FR': [H, ['vioben.fr', 'netbet', 'monobrand', 'FR'], ['brasseriedu20.fr', 'netbet', 'monobrand', 'FR'], [], ['', '', '', '', '*']],
+    };
+    const starParsed = ctx.parseSheetGrids(starTitles, starTitles.map((t) => ({ values: starGrids[t] })));
+    const nb = starParsed.targets.filter((t) => t.site === 'netbet');
+    ok(nb.length === 2 && starParsed.drops[nb[0].domain].length === 2, '17.5b lone "*" in any cell activates the whole tab');
+
     // full syncSheet flow via the API mock + rankpeek:syncSheet
     env.store.__sheet = { titles, grids };
     env.store.sheetId = 'https://docs.google.com/spreadsheets/d/ABC123456789012345678901/edit';
