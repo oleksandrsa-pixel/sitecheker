@@ -62,39 +62,37 @@ function hasMarker(title) {
   return DROP_MARKERS.some((m) => t.includes(m));
 }
 
-// Localized "Official (site)" and "Login / Access" vocabulary used in the stencil
-// (EN/ES/PT/IT/FR/GR + a few more). Tested against a lower-cased title.
-const OFFICIAL_RE = /(official|oficial|officiel|ufficiale|offiziell|oficjaln|επίσημ)/;
-const ACCESS_RE = /(login|log[\s-]?in|acc[eè]s|acess|entrar|entrada|acessar|connexion|είσοδ|anmeld|inloggen|ingresar)/;
+// Localized "Official (site)" and "Login / Access" vocabulary used in the drop
+// stencil (EN/ES/PT/IT/FR/GR …). Tested against the accent-folded side of the
+// title; the access words are word-boundaried so plain English words like
+// "access" / "accessory" do NOT match.
+const OFFICIAL_RE = /(official|oficial|officiel|ufficiale|offiziell|oficjaln|επισημ|επίσημ)/;
+const ACCESS_RE = /(\blogin\b|\blog[\s-]?in\b|\bacceso\b|\bacesso\b|\baccesso\b|\bacc[eè]s\b|\bentrar\b|\bentrada\b|\bingresar\b|\bconnexion\b|\baccedi\b|\banmeld|\binloggen\b|εισοδ|είσοδ)/;
 const firstToken = (s) => {
   const m = String(s || '').toLowerCase().match(/[a-z0-9]+/);
   return m ? m[0] : '';
 };
+const foldText = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-// Is this SERP title a drop? Requires the ᐉ marker AND at least one structural
-// signal of the copy-paste stencil, so a random site that merely uses ᐉ is not
-// flagged. `brand` (the tracked keyword/site) sharpens signal 2 when known.
+// Is this SERP title a drop? The drop stencil is "<Brand> Official Site ᐉ
+// <Brand> Login" (localized), so the tracked BRAND is the anchor. Requires the ᐉ
+// marker AND either: the brand (word-boundaried) on BOTH sides of the marker, OR
+// the brand present plus the "official"(left) + "login/access"(right) phrase
+// layout. This keeps out random ᐉ sites, review/guide pages and listicles.
 function isDropTitle(title, brand) {
   const t = String(title || '');
   const marker = DROP_MARKERS.find((m) => t.includes(m));
   if (!marker) return false; // the ᐉ marker is required
-  const i = t.indexOf(marker);
-  const left = t.slice(0, i);
-  const right = t.slice(i + marker.length);
-  const tl = t.toLowerCase();
-
-  // 1) The same token repeats right around the marker — the brand copied on both
-  //    sides ("Casea … ᐉ Casea …"). Strongest, self-contained signal.
-  const lt = firstToken(left);
-  if (lt && lt.length >= 2 && lt === firstToken(right)) return true;
-
-  // 2) The tracked brand appears on BOTH sides of the marker.
   const b = firstToken(brand);
-  if (b && b.length >= 2 && left.toLowerCase().includes(b) && right.toLowerCase().includes(b)) return true;
-
-  // 3) The localized "official … login/access" stencil phrases are both present.
-  if (OFFICIAL_RE.test(tl) && ACCESS_RE.test(tl)) return true;
-
+  if (!b || b.length < 2) return false; // the brand is the anchor
+  const i = t.indexOf(marker);
+  const left = foldText(t.slice(0, i));
+  const right = foldText(t.slice(i + marker.length));
+  const bre = new RegExp('(^|[^a-z0-9])' + b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-z0-9]|$)');
+  const onLeft = bre.test(left);
+  const onRight = bre.test(right);
+  if (onLeft && onRight) return true; // brand copied on both sides of ᐉ
+  if ((onLeft || onRight) && OFFICIAL_RE.test(left) && ACCESS_RE.test(right)) return true; // brand + stencil layout
   return false;
 }
 

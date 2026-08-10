@@ -478,6 +478,9 @@ async function main() {
     // stencil detector: ᐉ + a structural signal (brand repeated / official+login)
     ok(ctx.isDropTitle('Casea Official Site ᐉ Casea Login', 'casea') && ctx.isDropTitle('Vipsta Official Site ᐉ Vipsta Login', 'vipsta'), 'K.7 isDropTitle: real stencils -> true');
     ok(!ctx.isDropTitle('Top 10 Casinos 2024 ᐉ Best Bonuses', 'casea') && !ctx.isDropTitle('Casea Casino Review ᐉ Bonus Codes', 'casea') && !ctx.isDropTitle('No marker here at all', 'casea'), 'K.7b isDropTitle: ᐉ-only / review / no-marker -> false');
+    // brand-anchored: brandless / one-sided-brand / decorative-ᐉ / substring-brand all excluded
+    ok(!ctx.isDropTitle('Best Casinos ᐉ How to Login to the Official App', 'casea') && !ctx.isDropTitle('Casea Casino ᐉ Official Site & Player Login Guide', 'casea') && !ctx.isDropTitle('Casino Bonus 2024 ᐉ Casino Reviews', 'casea') && !ctx.isDropTitle('Bethesda official ᐉ better login page', 'bet'), 'K.7c isDropTitle: brandless / review / listicle / substring-brand -> false');
+    ok(ctx.isDropTitle('Sitio Oficial de Casea ᐉ Casea - Acceso', 'casea') && ctx.isDropTitle('Il sito ufficiale Casea ᐉ Accedi a Casea', 'casea'), 'K.7d isDropTitle: both-sides / brand-not-first variants -> true');
 
     // the active-brand watchlist scopes the view to only watched brands
     const shown = ctx.view();
