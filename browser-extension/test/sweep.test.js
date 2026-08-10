@@ -160,14 +160,19 @@ function makeEnv() {
 
   async function fetchMock(url, opts) {
     if (/api\.telegram\.org/.test(url)) {
-      let text = '';
+      let body = {};
       try {
-        text = JSON.parse(opts.body).text;
+        body = JSON.parse(opts.body);
       } catch {}
-      calls.tg.push(text);
-    } else {
-      calls.ingest.push({ url, body: opts && opts.body });
+      calls.tg.push(body.text || '');
+      // Simulate a Telegram API failure for a sentinel chat_id (the classic
+      // "user never pressed Start / wrong id" case).
+      if (body.chat_id === 'BADCHAT') {
+        return { ok: false, status: 400, json: async () => ({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) };
     }
+    calls.ingest.push({ url, body: opts && opts.body });
     return { ok: true, json: async () => ({}) };
   }
 
@@ -779,6 +784,34 @@ async function main() {
     const uniq = [...new Set(swept)].sort();
     ok(uniq.length === 2 && uniq.includes('winnercasino-it.com') && uniq.includes('twincasinos-pt.com'), '15.1 active sweep checks the full drops targets even though they are NOT in the main list', JSON.stringify(uniq));
     ok(!uniq.includes('big-casino.com'), '15.2 a main-list brand not in the drops watchlist is not swept by the active pass');
+  }
+
+  // ---------------------------------------------------------------------
+  section('16. Telegram test surfaces the real error (chat not found)');
+  {
+    const env = makeEnv();
+    loadBackground(env);
+    // success path
+    env.store.telegramToken = 'TOK';
+    env.store.telegramChatId = 'GOODCHAT';
+    let okResp;
+    env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:testTg' }, {}, (r) => { okResp = r; }));
+    await flush();
+    ok(okResp && okResp.ok === true, '16.1 valid setup -> {ok:true}');
+
+    // failure path: Telegram says "chat not found" -> surfaced verbatim
+    env.store.telegramChatId = 'BADCHAT';
+    let badResp;
+    env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:testTg' }, {}, (r) => { badResp = r; }));
+    await flush();
+    ok(badResp && badResp.ok === false && /chat not found/i.test(badResp.error || ''), '16.2 failure returns the real Telegram reason', JSON.stringify(badResp));
+
+    // empty creds -> clear message, no fetch
+    env.store.telegramToken = '';
+    let emptyResp;
+    env.listeners.message.forEach((fn) => fn({ type: 'rankpeek:testTg' }, {}, (r) => { emptyResp = r; }));
+    await flush();
+    ok(emptyResp && emptyResp.ok === false, '16.3 empty token/chat_id -> {ok:false}');
   }
 
   // done

@@ -337,6 +337,24 @@ $('savetg').addEventListener('click', () => {
   });
 });
 
+// Map a raw Telegram error to an actionable Ukrainian hint. Order matters —
+// "chat not found" contains "not found", so check it before the token cases.
+function tgHint(err) {
+  const e = String(err || '').toLowerCase();
+  if (e.includes('chat not found')) {
+    return 'Відкрий свого бота в Telegram і натисни Start, а chat_id має бути ЧИСЛО (напр. 630891719), не @username.';
+  }
+  if (e.includes("initiate") || e.includes('bot can')) {
+    return 'Спершу відкрий свого бота в Telegram і натисни Start — бот не може написати першим.';
+  }
+  if (e.includes('blocked')) return 'Ти заблокував бота — розблокуй його в Telegram.';
+  if (e.includes('unauthorized') || e.includes('http 401') || e.includes('http 404')) {
+    return 'Невірний Bot token — скопіюй його заново з @BotFather (без пробілів).';
+  }
+  if (e.includes('мереж')) return 'Перевір інтернет / VPN — можливо, Telegram недоступний у твоїй мережі.';
+  return 'Перевір Bot token і chat_id.';
+}
+
 $('testtg').addEventListener('click', () => {
   chrome.storage.local.set(
     {
@@ -347,10 +365,14 @@ $('testtg').addEventListener('click', () => {
       $('tgmsg').style.color = '#555';
       $('tgmsg').textContent = 'Надсилаю…';
       chrome.runtime.sendMessage({ type: 'rankpeek:testTg' }, (resp) => {
-        $('tgmsg').style.color = resp?.ok ? '#16a34a' : '#dc2626';
-        $('tgmsg').textContent = resp?.ok
-          ? 'Надіслано ✓ — перевір Telegram'
-          : 'Помилка: перевір token / chat_id';
+        if (resp?.ok) {
+          $('tgmsg').style.color = '#16a34a';
+          $('tgmsg').textContent = 'Надіслано ✓ — перевір Telegram';
+          return;
+        }
+        $('tgmsg').style.color = '#dc2626';
+        const err = resp?.error || 'невідома помилка';
+        $('tgmsg').textContent = `Помилка: ${err}. ${tgHint(err)}`;
       });
     },
   );

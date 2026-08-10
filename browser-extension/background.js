@@ -196,6 +196,39 @@ async function sendTelegram(token, chatId, text) {
   }
 }
 
+// Send a test message and return the REAL reason on failure, so the popup can
+// tell the user exactly what's wrong (Telegram's own description) instead of a
+// generic "check token / chat_id". Most common: "chat not found" = the user
+// never pressed Start in the bot, or the chat_id is wrong.
+async function telegramTest(token, chatId) {
+  if (!token || !chatId) return { ok: false, error: 'Порожній token або chat_id' };
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: '✅ Rank Peek підключено. Сюди приходитимуть алерти про падіння сайтів і дропи.',
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+  } catch (e) {
+    // Fetch itself failed — network / DNS / Telegram blocked on this connection.
+    return { ok: false, error: 'мережа: не вдалося зʼєднатися з api.telegram.org (' + ((e && e.message) || 'fetch failed') + ')' };
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* non-JSON body */
+  }
+  if (res.ok && data && data.ok) return { ok: true };
+  const desc = (data && data.description) || `HTTP ${res.status}`;
+  return { ok: false, error: String(desc) };
+}
+
 // Split a long Telegram message into <=limit chunks on line boundaries.
 async function sendTelegramChunked(token, chatId, text) {
   const LIMIT = 3500;
@@ -918,12 +951,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse?.({ ok: true });
     } else if (msg?.type === 'rankpeek:testTg') {
       const c = await chrome.storage.local.get(['telegramToken', 'telegramChatId']);
-      const ok = await sendTelegram(
-        c.telegramToken,
-        c.telegramChatId,
-        '✅ Rank Peek підключено. Сюди приходитимуть алерти про падіння сайтів із топ-5.',
-      );
-      sendResponse?.({ ok });
+      const r = await telegramTest(c.telegramToken, c.telegramChatId);
+      sendResponse?.(r);
     }
   })();
   return true; // keep the message channel open for the async response

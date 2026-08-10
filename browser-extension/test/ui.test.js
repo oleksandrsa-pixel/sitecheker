@@ -313,6 +313,11 @@ async function main() {
     const sepSemi = ['sep=;', 'Domain;keyword;GEO', 'foo.it;foo;Italy'].join('\r\n');
     const sepSemiT = ctx.parseCsvToTargets(sepSemi);
     ok(sepSemiT.length === 1 && sepSemiT[0].domain === 'foo.it', 'P.25 import honours sep=; hint');
+
+    // Telegram error hints — actionable guidance for the most common failures
+    ok(/start/i.test(ctx.tgHint('Bad Request: chat not found')), 'P.26 "chat not found" -> hint to press Start / fix chat_id');
+    ok(/token/i.test(ctx.tgHint('Unauthorized')), 'P.27 "Unauthorized" -> hint to re-copy the Bot token');
+    ok(/start/i.test(ctx.tgHint("Forbidden: bot can't initiate conversation with a user")), 'P.28 "can\'t initiate" -> hint to press Start');
   }
 
   // ---------------------------------------------------------------------
