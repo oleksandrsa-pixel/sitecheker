@@ -1,0 +1,400 @@
+<title>Drop Finder — инструкция с нуля</title>
+<style>
+  :root {
+    --bg: #f5f4f1;
+    --card: #ffffff;
+    --card-2: #faf9f7;
+    --line: #e7e4ec;
+    --ink: #1b1e28;
+    --muted: #5c6070;
+    --accent: #d9600d;
+    --accent-soft: #fbe6d6;
+    --green: #157f43;
+    --green-soft: #ddf1e5;
+    --indigo: #4b45d6;
+    --indigo-soft: #e7e6fb;
+    --red: #c0392b;
+    --red-soft: #fbe3df;
+    --code-bg: #f0eeeb;
+    --shadow: 0 1px 2px rgba(20, 20, 40, 0.05), 0 10px 30px rgba(20, 20, 40, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1220;
+      --card: #171a2b;
+      --card-2: #1c2033;
+      --line: #262a41;
+      --ink: #e7e9f3;
+      --muted: #9aa0bd;
+      --accent: #fb923c;
+      --accent-soft: rgba(251, 146, 60, 0.15);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.15);
+      --indigo: #a5b4fc;
+      --indigo-soft: rgba(99, 102, 241, 0.18);
+      --red: #f87171;
+      --red-soft: rgba(248, 113, 113, 0.15);
+      --code-bg: #0d1020;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1220;
+    --card: #171a2b;
+    --card-2: #1c2033;
+    --line: #262a41;
+    --ink: #e7e9f3;
+    --muted: #9aa0bd;
+    --accent: #fb923c;
+    --accent-soft: rgba(251, 146, 60, 0.15);
+    --green: #34d399;
+    --green-soft: rgba(52, 211, 153, 0.15);
+    --indigo: #a5b4fc;
+    --indigo-soft: rgba(99, 102, 241, 0.18);
+    --red: #f87171;
+    --red-soft: rgba(248, 113, 113, 0.15);
+    --code-bg: #0d1020;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 800px; margin: 0 auto; padding: 40px 20px 72px; }
+
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 0.86em;
+  }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+
+  /* ---- Masthead ---- */
+  .mast {
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--card), var(--card-2));
+    border-radius: 16px;
+    padding: 28px 28px 26px;
+    box-shadow: var(--shadow);
+    margin-bottom: 14px;
+  }
+  .kicker {
+    font: 600 12px/1 ui-monospace, monospace;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 40px);
+    line-height: 1.08;
+    margin: 0 0 10px;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .lede { color: var(--muted); font-size: 17px; margin: 0; max-width: 60ch; }
+  .need {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px;
+  }
+  .chip {
+    font: 500 13px/1 system-ui, sans-serif;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    padding: 7px 11px;
+    border-radius: 999px;
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  /* ---- Steps ---- */
+  .step {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 24px 22px 26px;
+    margin-top: 14px;
+    box-shadow: var(--shadow);
+  }
+  .step > h2 {
+    display: flex; align-items: center; gap: 12px;
+    margin: 0 0 12px;
+    font-size: 20px; letter-spacing: -0.01em;
+  }
+  .num {
+    flex: 0 0 auto;
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 9px;
+    background: var(--accent);
+    color: #fff;
+    font: 700 15px/1 ui-monospace, monospace;
+  }
+  :root[data-theme="dark"] .num,
+  :root:not([data-theme="light"]) .num { color: #241206; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .num { color: #fff; } }
+  .step h2 .opt { font: 500 12px/1 system-ui; color: var(--muted); border: 1px solid var(--line); padding: 4px 8px; border-radius: 999px; }
+
+  ol.sub, ul.sub { margin: 0; padding-left: 22px; }
+  ol.sub > li, ul.sub > li { margin: 7px 0; }
+  ol.sub { counter-reset: none; }
+  p { margin: 10px 0; }
+  .step p:first-of-type { margin-top: 0; }
+  b, strong { font-weight: 650; }
+  a { color: var(--indigo); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--indigo) 35%, transparent); }
+  a:hover { border-bottom-color: var(--indigo); }
+
+  /* ---- Callouts ---- */
+  .call {
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 14px 0 2px;
+    font-size: 14.5px;
+    border: 1px solid var(--line);
+    border-left-width: 4px;
+  }
+  .call .lbl { font-weight: 700; }
+  .call.tip { background: var(--green-soft); border-left-color: var(--green); }
+  .call.tip .lbl { color: var(--green); }
+  .call.warn { background: var(--accent-soft); border-left-color: var(--accent); }
+  .call.warn .lbl { color: var(--accent); }
+  .call.info { background: var(--indigo-soft); border-left-color: var(--indigo); }
+  .call.info .lbl { color: var(--indigo); }
+
+  .btn {
+    display: inline-block;
+    font: 600 13px/1 ui-monospace, monospace;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    padding: 4px 9px;
+    border-radius: 7px;
+    white-space: nowrap;
+  }
+
+  /* ---- Sheet template table ---- */
+  .tablewrap { overflow-x: auto; margin: 14px 0 4px; border: 1px solid var(--line); border-radius: 10px; }
+  table.tpl { border-collapse: collapse; width: 100%; min-width: 460px; font-size: 14px; }
+  table.tpl th, table.tpl td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.tpl thead th { background: var(--accent-soft); color: var(--accent); font: 700 12px/1 ui-monospace, monospace; letter-spacing: 0.03em; text-transform: uppercase; }
+  table.tpl tbody tr:last-child td { border-bottom: 0; }
+  table.tpl .dom { font-family: ui-monospace, monospace; color: var(--accent); font-weight: 600; }
+  table.tpl .star { color: var(--accent); font-weight: 800; text-align: center; }
+  .cap { font-size: 13px; color: var(--muted); margin: 6px 2px 0; }
+
+  /* ---- Legend chips (drops page marks) ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px; }
+  .tag { font: 700 11px/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.04em; padding: 5px 9px; border-radius: 999px; }
+  .tag.drop { background: var(--accent); color: #241206; }
+  .tag.you { background: var(--green); color: #06281c; }
+  .tag.comp { background: var(--red-soft); color: var(--red); }
+  .tag.other { background: var(--card-2); color: var(--muted); border: 1px solid var(--line); }
+
+  /* ---- FAQ ---- */
+  .faq { border: 1px solid var(--line); border-radius: 10px; background: var(--card-2); padding: 4px 16px; margin-top: 10px; }
+  .faq details { border-bottom: 1px solid var(--line); }
+  .faq details:last-child { border-bottom: 0; }
+  .faq summary { cursor: pointer; font-weight: 600; padding: 13px 0; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::before { content: "+"; color: var(--accent); font-family: ui-monospace, monospace; font-weight: 700; }
+  .faq details[open] summary::before { content: "–"; }
+  .faq .ans { padding: 0 0 14px 18px; color: var(--muted); font-size: 14.5px; }
+  .faq .ans b { color: var(--ink); }
+
+  /* ---- Glossary ---- */
+  .gloss { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 12px; }
+  @media (min-width: 560px) { .gloss { grid-template-columns: 1fr 1fr; } }
+  .gloss div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--card); }
+  .gloss dt { font-weight: 700; color: var(--accent); font-size: 14px; margin-bottom: 3px; }
+  .gloss dd { margin: 0; font-size: 14px; color: var(--muted); }
+
+  .sec-label {
+    font: 600 12px/1 ui-monospace, monospace;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+    margin: 30px 2px 2px;
+  }
+
+  footer { color: var(--muted); font-size: 14px; margin-top: 30px; text-align: center; }
+  footer b { color: var(--ink); }
+  hr.soft { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+</style>
+
+<div class="wrap">
+
+  <div class="mast">
+    <div class="kicker">Инструкция · с нуля</div>
+    <h1>Drop Finder — отслеживаем дропы через Google Таблицу</h1>
+    <p class="lede">Пошаговый гайд для того, кто видит это впервые: от установки расширения до первого прогона и Telegram-алертов. Делается один раз, минут за 15.</p>
+    <div class="need">
+      <span class="chip">🌐 Нужен: <b>Chrome</b></span>
+      <span class="chip">📧 <b>Google-аккаунт</b></span>
+      <span class="chip">⏱ ~<b>15 минут</b></span>
+      <span class="chip">💬 Telegram — по желанию</span>
+    </div>
+  </div>
+
+  <div class="call info" style="margin-top:14px">
+    <span class="lbl">Что это вообще делает.</span> Ты ведёшь таблицу с дроп-доменами по проектам. Расширение само открывает Google в нужной стране, ищет по бренду и показывает, какие твои дропы уже попали в топ-10. Всё — в твоём браузере, под твоей сессией.
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="step">
+    <h2><span class="num">1</span> Установить расширение</h2>
+    <ol class="sub">
+      <li>Распакуй архив <code>drop-finder</code> в любую папку (её нельзя потом удалять — расширение читает файлы оттуда).</li>
+      <li>Открой в Chrome адрес <code>chrome://extensions</code></li>
+      <li>Включи справа вверху переключатель <b>«Режим розробника»</b>.</li>
+      <li>Нажми <span class="btn">Завантажити розпаковане</span> и выбери папку <code>drop-finder</code>.</li>
+      <li>В панели появится иконка 🎯 — это и есть Drop Finder. Готово.</li>
+    </ol>
+    <div class="call tip"><span class="lbl">Совет.</span> Нажми на «пазл» справа от адресной строки и «пришпиль» иконку 🎯, чтобы она была всегда под рукой.</div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="step">
+    <h2><span class="num">2</span> Получить Google API-ключ</h2>
+    <p>Ключ нужен, чтобы расширение могло <b>читать</b> твою таблицу (только читать). Это бесплатно.</p>
+    <ol class="sub">
+      <li>Зайди на <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> под своим Google-аккаунтом.</li>
+      <li>Вверху создай проект: селектор проектов → <b>New Project</b> → любое имя → <b>Create</b>.</li>
+      <li>Включи нужный API: открой <a href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank" rel="noopener">страницу Google Sheets API</a> → кнопка <b>Enable</b>.</li>
+      <li>Создай ключ: <b>APIs &amp; Services → Credentials → Create credentials → API key</b>.</li>
+      <li>Скопируй ключ вида <code>AIza…</code> — он понадобится в шаге 5.</li>
+    </ol>
+    <div class="call warn"><span class="lbl">Важно.</span> Выбирай именно <b>«API key»</b>. Не «Help me choose», не «OAuth client», не «Service account» — они для другого и не подойдут.</div>
+    <div class="call tip"><span class="lbl">Безопасность.</span> После создания нажми <b>Restrict key</b> → в «API restrictions» выбери <b>Google Sheets API</b>. Тогда ключ сможет читать только таблицы и ничего больше.</div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="step">
+    <h2><span class="num">3</span> Открыть доступ к таблице</h2>
+    <ol class="sub">
+      <li>Открой свою Google Таблицу.</li>
+      <li>Справа вверху <b>«Поділитися»</b> (Share).</li>
+      <li>В «Загальний доступ» выбери <b>«Усі, хто має посилання»</b> → роль <b>«Читач»</b>.</li>
+      <li>Скопируй ссылку на таблицу — пригодится в шаге 5.</li>
+    </ol>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="step">
+    <h2><span class="num">4</span> Заполнить таблицу по шаблону</h2>
+    <p>Правила простые:</p>
+    <ul class="sub">
+      <li>Каждая <b>вкладка = один проект</b> (бренд + гео). Первая строка — заголовки.</li>
+      <li>Колонки: <code>domain</code>, <code>brand</code>, <code>Type</code>, <code>geo</code>.</li>
+      <li><code>domain</code> — это <b>сами дроп-домены</b>. <code>brand</code> — бренд (по нему идёт поиск). <code>geo</code> — код страны: <code>FR</code>, <code>IT</code>, <code>ES</code>, <code>PT</code>, <code>GR</code>…</li>
+    </ul>
+
+    <div class="tablewrap">
+      <table class="tpl">
+        <thead>
+          <tr><th>domain</th><th>brand</th><th>Type</th><th>geo</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="dom">meuse-internet.fr</td><td>Gamblerina</td><td>monobrand</td><td>FR</td><td class="star">✱</td></tr>
+          <tr><td class="dom">carpes-koi.fr</td><td>Gamblerina</td><td>monobrand</td><td>FR</td><td></td></tr>
+          <tr><td class="dom">vioben.fr</td><td>Gamblerina</td><td>monobrand</td><td>FR</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cap">Пример вкладки «Gamblerina FR». В колонке <code>domain</code> — твои дропы. Достаточно поставить одну <code>*</code> в любой клетке — и вся вкладка идёт в работу.</p>
+
+    <div class="call warn"><span class="lbl">Как отметить проект для проверки.</span> Поставь <b><code>*</code> (звёздочку) в любой клетке</b> вкладки — или добавь <code>*</code> в её название. Убрал <code>*</code> → проект перестаёт отслеживаться при следующей синхронизации.</div>
+    <div class="call info"><span class="lbl">Почему «*», а не «+».</span> Ячейка, которая начинается с <code>+</code>, превращается в Google Таблицах в формулу и ломается. Со звёздочкой такого нет.</div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="step">
+    <h2><span class="num">5</span> Подключить таблицу в расширении</h2>
+    <ol class="sub">
+      <li>Нажми иконку 🎯 → раздел <b>«📊 Google Таблиця»</b>.</li>
+      <li>Вставь <b>ссылку на таблицу</b> и <b>API-ключ</b> из шагов 2–3.</li>
+      <li>Поставь галочку <b>«Авто-синхронізація»</b> (например, каждые <code>30</code> мин).</li>
+      <li>Поле доп. слова оставь как есть — там уже <code>casino</code> (запрос будет «бренд» и «бренд casino»).</li>
+      <li>Нажми <span class="btn">Зберегти + увімкнути</span>, затем <span class="btn">Синхронізувати зараз</span>.</li>
+    </ol>
+    <div class="call tip"><span class="lbl">Как понять, что сработало.</span> Внизу появится строка вроде <b>«Готово ✓ 1 вкладок · 1 проєктів · 2 запитів · 6 дропів»</b>. Если там нули — смотри раздел «Частые проблемы».</div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="step">
+    <h2><span class="num">6</span> Запустить прогон и смотреть дропы</h2>
+    <ol class="sub">
+      <li>Нажми <span class="btn">🎯 Прогін дропів</span>. Бот сам откроет Google в нужных странах и прочитает топ-10. Вкладки закрываются сами — <b>не трогай их во время прогона</b>.</li>
+      <li>Когда статус покажет, что проход завершён — нажми <span class="btn">👁 Дропи</span>.</li>
+      <li>По каждому проекту видно топ-10 и какие твои дропы туда попали (точное совпадение по домену).</li>
+    </ol>
+    <p style="margin-top:14px">Что значат метки в результатах:</p>
+    <div class="legend">
+      <span class="tag drop">Дроп</span>
+      <span class="tag you">Ваш сайт</span>
+      <span class="tag comp">Конкурент</span>
+      <span class="tag other">Агрегатор / Іньше</span>
+    </div>
+    <div class="call warn"><span class="lbl">Если Google показал CAPTCHA.</span> Просто реши её в открывшейся вкладке — прогон продолжится сам. Чтобы капчи было меньше — не запускай слишком часто и не помечай <code>*</code> лишние проекты.</div>
+  </div>
+
+  <!-- STEP 7 -->
+  <div class="step">
+    <h2><span class="num">7</span> Telegram-алерты о новых дропах <span class="opt">по желанию</span></h2>
+    <p>Чтобы получать сообщение, когда новый дроп появился в топ-10:</p>
+    <ol class="sub">
+      <li><b>Создай бота:</b> в Telegram открой <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → команда <code>/newbot</code> → задай имя → он выдаст <b>token</b> вида <code>123456:ABC…</code></li>
+      <li><b>Узнай свой chat_id:</b> открой <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a> → <code>/start</code> → он пришлёт число (это и есть chat_id).</li>
+      <li><b>Нажми Start у своего бота</b> (того, что создал в п.1) — бот не может написать первым.</li>
+      <li>В расширении раздел <b>«📣 Telegram-алерти»</b> → вставь <b>token</b> и <b>chat_id</b> → <span class="btn">Зберегти</span> → <span class="btn">Тест Telegram</span>.</li>
+      <li>Пришло «Надіслано ✓» и сообщение в Telegram — значит всё работает.</li>
+    </ol>
+  </div>
+
+  <!-- FAQ -->
+  <div class="sec-label">Частые проблемы</div>
+  <div class="faq">
+    <details>
+      <summary>После синхронизации — «0 вкладок / 0 проєктів»</summary>
+      <div class="ans">Нигде не стоит <b><code>*</code></b> (поставь звёздочку в любой клетке нужной вкладки). Или в таблице нет колонок <code>domain</code> и <code>brand</code> в первой строке. Или доступ к таблице не открыт по ссылке (шаг 3).</div>
+    </details>
+    <details>
+      <summary>Ошибка ключа или доступа при синхронизации</summary>
+      <div class="ans">Проверь: включён ли <b>Google Sheets API</b> (шаг 2.3); таблица открыта <b>«по ссылке — Читач»</b>; ключ скопирован полностью и от <b>того же проекта</b>, где включён API.</div>
+    </details>
+    <details>
+      <summary>Telegram: «chat not found» или тест не проходит</summary>
+      <div class="ans">Чаще всего — ты <b>не нажал Start</b> у своего бота. Ещё: <code>chat_id</code> должен быть <b>числом</b> (не @username), а token — без пробелов. Новый тест теперь пишет, что именно не так — токен или chat_id.</div>
+    </details>
+    <details>
+      <summary>Google всё время просит CAPTCHA / ошибка 403</summary>
+      <div class="ans">Слишком много запросов подряд. Реши капчу в открытой вкладке (прогон продолжится), запускай реже и убери <code>*</code> с проектов, которые сейчас не нужны. Меньше активных проектов = меньше запросов.</div>
+    </details>
+    <details>
+      <summary>В «Дропи» пусто после обычного прогона</summary>
+      <div class="ans">Так и должно быть: вкладка «Дропи» показывает <b>только</b> активные бренды из таблицы. Подключи таблицу и нажми <span class="btn">🎯 Прогін дропів</span>.</div>
+    </details>
+  </div>
+
+  <!-- Glossary -->
+  <div class="sec-label">Мини-словарь</div>
+  <dl class="gloss">
+    <div><dt>Дроп</dt><dd>Вспомогательный домен под бренд, который двигаем в топ выдачи.</dd></div>
+    <div><dt>Гео</dt><dd>Страна выдачи Google: FR — Франция, IT — Италия и т.д.</dd></div>
+    <div><dt>Прогон</dt><dd>Один проход бота по всем активным запросам из таблицы.</dd></div>
+    <div><dt>Топ-10</dt><dd>Первые 10 обычных (органических) результатов Google.</dd></div>
+  </dl>
+
+  <hr class="soft" />
+  <footer>
+    Есть и «старшая» версия — <b>Rank Peek</b>: то же самое плюс отслеживание позиций основных сайтов, отчёты и расписание. Для чистой работы с дропами достаточно <b>Drop Finder</b>.
+  </footer>
+
+</div>
