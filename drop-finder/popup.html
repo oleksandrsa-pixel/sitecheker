@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: #0f1220;
+    --card: #171a2b;
+    --line: #262a41;
+    --txt: #e7e9f3;
+    --muted: #9aa0bd;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --orange: #fb923c;
+    --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    width: 400px; margin: 0; padding: 14px;
+    font: 13px/1.45 system-ui, -apple-system, sans-serif;
+    color: var(--txt); background: var(--bg);
+  }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .logo { font-size: 16px; font-weight: 700; }
+  .logo small { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: #2a2f4a; color: var(--muted); white-space: nowrap; }
+  .badge.run { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; }
+  .actions { display: flex; gap: 8px; margin-bottom: 8px; }
+  .btn { flex: 1; padding: 9px 10px; border: 0; border-radius: 8px; font-weight: 600; font-size: 12px; cursor: pointer; color: #fff; }
+  .btn-run { background: var(--orange); color: #241206; }
+  .btn-stop { background: #3a2030; color: var(--red); flex: 0 0 auto; }
+  .btn-ghost { background: var(--card); color: var(--txt); border: 1px solid var(--line); }
+  .status { font-size: 12px; color: var(--muted); margin-bottom: 4px; min-height: 16px; }
+  .msg { min-height: 16px; margin-top: 5px; font-size: 11.5px; }
+  details { margin-top: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  details[open] { padding-bottom: 12px; }
+  summary { cursor: pointer; font-weight: 600; color: var(--txt); outline: none; }
+  .hint { color: var(--muted); margin: 8px 0 3px; font-size: 11.5px; }
+  .hint a { color: #a5b4fc; }
+  input { width: 100%; background: #0d1020; color: var(--txt); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 11.5px ui-monospace, Consolas, monospace; }
+  input[type='checkbox'], input[type='number'] { width: auto; }
+  .row-btns { margin-top: 8px; display: flex; gap: 8px; }
+  .row-btns button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--accent); color: #fff; cursor: pointer; font-weight: 600; font-size: 12px; }
+  .row-btns button.sec { background: transparent; color: var(--muted); }
+  code { background: #0d1020; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  .guide li { margin: 4px 0; color: var(--muted); }
+  .guide b { color: var(--txt); }
+</style>
+
+<header>
+  <div class="logo">🎯 Drop Finder <small>дропи з таблиці</small></div>
+  <span id="badge" class="badge">—</span>
+</header>
+
+<div class="actions">
+  <button id="runactive" class="btn btn-run">🎯 Прогін дропів</button>
+  <button id="drops" class="btn btn-ghost">👁 Дропи</button>
+  <button id="stop" class="btn btn-stop">■ Стоп</button>
+</div>
+<div id="status" class="status">—</div>
+<div id="runmsg" class="msg"></div>
+
+<details open>
+  <summary>📊 Google Таблиця</summary>
+  <p class="hint">
+    Постав <b>*</b> у будь-якій клітинці вкладки (або в її назві) — і бот візьме її в роботу.
+    Формат вкладки: <code>domain, brand, Type, geo</code>, де <code>domain</code> — самі дропи.
+  </p>
+  <p class="hint">Посилання на таблицю (або ID):</p>
+  <input id="sheeturl" type="text" placeholder="https://docs.google.com/spreadsheets/d/…" />
+  <p class="hint">Google API-ключ (лише читання):</p>
+  <input id="sheetkey" type="text" placeholder="AIza…" />
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="sheetsync" type="checkbox" /> <b>Авто-синхронізація</b> кожні
+    <input id="sheetmin" type="number" min="5" step="5" value="30" style="width: 56px" /> хв
+  </label>
+  <p class="hint" style="margin-top: 6px">
+    Запит на проєкт: <b>«бренд»</b> + <b>«бренд + слово»</b> (гео — авто). Порожньо = лише бренд.
+  </p>
+  <input id="sheetkw" type="text" placeholder="casino" value="casino" />
+  <p class="hint" style="margin-top: 6px">
+    Ключ: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com</a>
+    → проєкт → увімкни <b>Google Sheets API</b> → Create credentials → <b>API key</b>. Таблицю
+    відкрий «Усі, хто має посилання — Читач».
+  </p>
+  <div class="row-btns">
+    <button id="savesheet">Зберегти + увімкнути</button>
+    <button id="syncsheet" class="sec">Синхронізувати зараз</button>
+  </div>
+  <div id="sheetmsg" class="msg"></div>
+</details>
+
+<details>
+  <summary>📣 Telegram-алерти про дропи (необовʼязково)</summary>
+  <p class="hint">Писатиму, коли в топ-10 активного бренду зʼявляється новий дроп.</p>
+  <p class="hint">Bot token (від @BotFather):</p>
+  <input id="tgtoken" type="text" placeholder="123456:ABC…" />
+  <p class="hint">chat_id (число, від @userinfobot):</p>
+  <input id="tgchat" type="text" placeholder="630891719" />
+  <label style="display: block; margin-top: 8px; color: var(--muted)">
+    <input id="dropalerts" type="checkbox" checked /> Слати алерти про нові дропи
+  </label>
+  <div class="row-btns">
+    <button id="savetg">Зберегти</button>
+    <button id="testtg" class="sec">Тест Telegram</button>
+  </div>
+  <div id="tgmsg" class="msg"></div>
+</details>
+
+<details>
+  <summary>❓ Як це працює</summary>
+  <ol class="guide" style="padding-left: 18px; margin: 8px 0 0">
+    <li>Заповни таблицю й познач потрібні вкладки <b>*</b>.</li>
+    <li>Встав посилання + API-ключ вище → <b>Зберегти + увімкнути</b> → <b>Синхронізувати зараз</b>.</li>
+    <li>Натисни <b>🎯 Прогін дропів</b> — бот сам відкриє Google у твоїх гео й прочитає топ-10.</li>
+    <li>Тисни <b>👁 Дропи</b> — там кожен проєкт і які твої дропи вже в топі (точний збіг доменів).</li>
+  </ol>
+  <p class="hint" style="margin-top: 8px">
+    Прогін іде у твоєму браузері, вкладки закриваються самі. Не став надто часто — забагато
+    запитів = ризик, що Google покаже CAPTCHA (403).
+  </p>
+</details>
+
+<script src="popup.js"></script>
