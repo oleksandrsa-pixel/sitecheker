@@ -1,0 +1,338 @@
+<title>Rank Peek — полная инструкция с нуля</title>
+<style>
+  :root {
+    --bg: #f4f4f7;
+    --card: #ffffff;
+    --card-2: #f8f8fb;
+    --line: #e5e4ee;
+    --ink: #191b26;
+    --muted: #585d72;
+    --accent: #4b45d6;          /* Rank Peek indigo */
+    --accent-soft: #e7e6fb;
+    --run: #157f43;             /* green — in top / run */
+    --run-soft: #ddf1e5;
+    --drop: #cc5f0c;            /* orange — drops */
+    --drop-soft: #fbe6d6;
+    --red: #c0392b;
+    --red-soft: #fbe3df;
+    --code-bg: #f0eff4;
+    --shadow: 0 1px 2px rgba(20, 20, 40, 0.05), 0 10px 30px rgba(20, 20, 40, 0.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1220; --card: #171a2b; --card-2: #1c2033; --line: #262a41;
+      --ink: #e7e9f3; --muted: #9aa0bd;
+      --accent: #a5b4fc; --accent-soft: rgba(99, 102, 241, 0.18);
+      --run: #34d399; --run-soft: rgba(52, 211, 153, 0.15);
+      --drop: #fb923c; --drop-soft: rgba(251, 146, 60, 0.15);
+      --red: #f87171; --red-soft: rgba(248, 113, 113, 0.15);
+      --code-bg: #0d1020; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1220; --card: #171a2b; --card-2: #1c2033; --line: #262a41;
+    --ink: #e7e9f3; --muted: #9aa0bd;
+    --accent: #a5b4fc; --accent-soft: rgba(99, 102, 241, 0.18);
+    --run: #34d399; --run-soft: rgba(52, 211, 153, 0.15);
+    --drop: #fb923c; --drop-soft: rgba(251, 146, 60, 0.15);
+    --red: #f87171; --red-soft: rgba(248, 113, 113, 0.15);
+    --code-bg: #0d1020; --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.62 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 40px 20px 72px; }
+
+  code, .mono { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace; font-size: 0.85em; }
+  code { background: var(--code-bg); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; }
+
+  .mast {
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--card), var(--card-2));
+    border-radius: 16px; padding: 28px 28px 26px; box-shadow: var(--shadow); margin-bottom: 14px;
+  }
+  .kicker { font: 600 12px/1 ui-monospace, monospace; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: 12px; }
+  h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.08; margin: 0 0 10px; letter-spacing: -0.02em; text-wrap: balance; }
+  .lede { color: var(--muted); font-size: 17px; margin: 0; max-width: 62ch; }
+  .need { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .chip { font: 500 13px/1 system-ui, sans-serif; background: var(--card-2); border: 1px solid var(--line); color: var(--muted); padding: 7px 11px; border-radius: 999px; }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  .part { display: flex; align-items: center; gap: 12px; margin: 34px 4px 6px; }
+  .part .bar { width: 26px; height: 3px; border-radius: 2px; background: var(--accent); }
+  .part.drops .bar { background: var(--drop); }
+  .part h2 { margin: 0; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+
+  .step { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; margin-top: 12px; box-shadow: var(--shadow); }
+  .step > h3 { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; font-size: 20px; letter-spacing: -0.01em; }
+  .num { flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--accent); color: #fff; font: 700 15px/1 ui-monospace, monospace; }
+  :root[data-theme="dark"] .num, :root:not([data-theme="light"]) .num { color: #0f1220; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .num { color: #fff; } }
+  .step.drops > h3 .num { background: var(--drop); }
+  :root[data-theme="dark"] .step.drops .num, :root:not([data-theme="light"]) .step.drops .num { color: #241206; }
+  .step h3 .opt { font: 500 12px/1 system-ui; color: var(--muted); border: 1px solid var(--line); padding: 4px 8px; border-radius: 999px; }
+
+  ol.sub, ul.sub { margin: 0; padding-left: 22px; }
+  ol.sub > li, ul.sub > li { margin: 7px 0; }
+  p { margin: 10px 0; }
+  .step p:first-of-type { margin-top: 0; }
+  b, strong { font-weight: 650; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  a:hover { border-bottom-color: var(--accent); }
+
+  .call { border-radius: 10px; padding: 12px 14px; margin: 14px 0 2px; font-size: 14.5px; border: 1px solid var(--line); border-left-width: 4px; }
+  .call .lbl { font-weight: 700; }
+  .call.tip { background: var(--run-soft); border-left-color: var(--run); } .call.tip .lbl { color: var(--run); }
+  .call.warn { background: var(--drop-soft); border-left-color: var(--drop); } .call.warn .lbl { color: var(--drop); }
+  .call.info { background: var(--accent-soft); border-left-color: var(--accent); } .call.info .lbl { color: var(--accent); }
+
+  .btn { display: inline-block; font: 600 13px/1 ui-monospace, monospace; padding: 4px 9px; border-radius: 7px; white-space: nowrap; background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+  .btn.run { background: var(--run-soft); color: var(--run); border-color: color-mix(in srgb, var(--run) 40%, transparent); }
+  .btn.drop { background: var(--drop-soft); color: var(--drop); border-color: color-mix(in srgb, var(--drop) 40%, transparent); }
+
+  .tablewrap { overflow-x: auto; margin: 14px 0 4px; border: 1px solid var(--line); border-radius: 10px; }
+  table.tpl { border-collapse: collapse; width: 100%; min-width: 460px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  table.tpl th, table.tpl td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.tpl thead th { background: var(--accent-soft); color: var(--accent); font: 700 12px/1 ui-monospace, monospace; letter-spacing: 0.03em; text-transform: uppercase; }
+  table.tpl.d thead th { background: var(--drop-soft); color: var(--drop); }
+  table.tpl tbody tr:last-child td { border-bottom: 0; }
+  table.tpl .dom { font-family: ui-monospace, monospace; color: var(--accent); font-weight: 600; }
+  table.tpl.d .dom { color: var(--drop); }
+  table.tpl .star { color: var(--drop); font-weight: 800; text-align: center; }
+  .cap { font-size: 13px; color: var(--muted); margin: 6px 2px 0; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px; }
+  .tag { font: 700 11px/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.04em; padding: 5px 9px; border-radius: 999px; }
+  .tag.drop { background: var(--drop); color: #241206; }
+  .tag.you { background: var(--run); color: #06281c; }
+  .tag.comp { background: var(--red-soft); color: var(--red); }
+  .tag.other { background: var(--card-2); color: var(--muted); border: 1px solid var(--line); }
+
+  .faq { border: 1px solid var(--line); border-radius: 10px; background: var(--card-2); padding: 4px 16px; margin-top: 10px; }
+  .faq details { border-bottom: 1px solid var(--line); } .faq details:last-child { border-bottom: 0; }
+  .faq summary { cursor: pointer; font-weight: 600; padding: 13px 0; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::before { content: "+"; color: var(--accent); font-family: ui-monospace, monospace; font-weight: 700; }
+  .faq details[open] summary::before { content: "–"; }
+  .faq .ans { padding: 0 0 14px 18px; color: var(--muted); font-size: 14.5px; }
+  .faq .ans b { color: var(--ink); }
+
+  .gloss { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 12px; }
+  @media (min-width: 560px) { .gloss { grid-template-columns: 1fr 1fr; } }
+  .gloss div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--card); }
+  .gloss dt { font-weight: 700; color: var(--accent); font-size: 14px; margin-bottom: 3px; }
+  .gloss dd { margin: 0; font-size: 14px; color: var(--muted); }
+
+  .sec-label { font: 600 12px/1 ui-monospace, monospace; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 34px 2px 2px; }
+  footer { color: var(--muted); font-size: 14px; margin-top: 30px; text-align: center; }
+  footer b { color: var(--ink); }
+  hr.soft { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
+</style>
+
+<div class="wrap">
+
+  <div class="mast">
+    <div class="kicker">Полная инструкция · с нуля</div>
+    <h1>Rank Peek — позиции сайтов в Google + поиск дропов</h1>
+    <p class="lede">Расширение открывает Google в <b>твоём</b> браузере (твоя сессия и гео) и читает реальные позиции сайтов по ключевикам. Плюс отдельный модуль дропов через Google Таблицу. Всё локально, без прокси и сторонних сервисов.</p>
+    <div class="need">
+      <span class="chip">🌐 Нужен: <b>Chrome</b></span>
+      <span class="chip">📄 <b>Список сайтов</b> (CSV)</span>
+      <span class="chip">💬 <b>Telegram-бот</b> — для алертов</span>
+      <span class="chip">📊 <b>Google Таблица</b> — для дропов</span>
+    </div>
+  </div>
+
+  <div class="call info" style="margin-top:14px">
+    <span class="lbl">Как это устроено в двух словах.</span> Ты даёшь список «сайт + ключевик + страна». Расширение по очереди ищет каждый в Google, запоминает позицию и сравнивает с прошлым разом. Если сайт выпал из топа — присылает алерт в Telegram. Дропы — отдельно: их список берётся из твоей Google Таблицы.
+  </div>
+
+  <!-- STEP 1 — install -->
+  <div class="step">
+    <h3><span class="num">1</span> Установить расширение</h3>
+    <ol class="sub">
+      <li>Распакуй архив с расширением в постоянную папку (её нельзя удалять — Chrome читает файлы оттуда).</li>
+      <li>Открой <code>chrome://extensions</code></li>
+      <li>Включи справа вверху <b>«Режим розробника»</b>.</li>
+      <li>Нажми <span class="btn">Завантажити розпаковане</span> и выбери папку расширения.</li>
+      <li>Появится иконка 🔎 <b>Rank Peek</b>. «Пришпиль» её через «пазл» у адресной строки.</li>
+    </ol>
+    <div class="call tip"><span class="lbl">Главное правило.</span> Chrome должен быть <b>открыт</b> во время проходов — расширение работает через твой браузер, а не на сервере.</div>
+  </div>
+
+  <!-- ============ PART 1 ============ -->
+  <div class="part"><span class="bar"></span><h2>Часть 1 · Позиции сайтов</h2></div>
+
+  <!-- STEP 2 — site list -->
+  <div class="step">
+    <h3><span class="num">2</span> Загрузить список сайтов</h3>
+    <p>Открой иконку 🔎 → раздел <b>«📄 Список сайтів (CSV / JSON)»</b> и загрузи CSV. Достаточно 4 колонок:</p>
+    <div class="tablewrap">
+      <table class="tpl">
+        <thead><tr><th>Domain</th><th>keyword</th><th>second keyword</th><th>GEO</th></tr></thead>
+        <tbody>
+          <tr><td class="dom">mycasino.it</td><td>mycasino</td><td>mycasino bonus</td><td>Italy</td></tr>
+          <tr><td class="dom">mysite-pt.com</td><td>mysite</td><td>mysite casino</td><td>Portugal</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cap">Brand — необязательно (возьмётся из keyword). Полный формат (Brand, location_name, language_code…) тоже читается. Дубли убираются сами.</p>
+    <p>Здесь же — настройки против блокировок (можно оставить по умолчанию):</p>
+    <ul class="sub">
+      <li><b>Пауза між запитами, сек</b> — меньше = быстрее, но выше риск CAPTCHA (норм: <code>20</code>).</li>
+      <li><b>🛡 Анти-блок: довга пауза кожні N запитів</b> и её длительность — периодический «перекур».</li>
+      <li><b>Пауза після блокування / CAPTCHA, хв</b> — на сколько встать на паузу после блокировки.</li>
+    </ul>
+    <p>Нажми <span class="btn">Зберегти</span>. Список появится в таблице вверху попапа.</p>
+  </div>
+
+  <!-- STEP 3 — first sweep -->
+  <div class="step">
+    <h3><span class="num">3</span> Первый прогон</h3>
+    <ol class="sub">
+      <li>Нажми <span class="btn run">▶ Прохід</span>. Расширение начнёт по очереди открывать Google по каждому ключевику в его стране и читать позицию с экрана.</li>
+      <li>Вкладки открываются и закрываются сами — <b>не мешай во время прохода</b>. Прогресс виден в строке статуса.</li>
+      <li>Если Google покажет <b>CAPTCHA</b> — реши её в открытой вкладке, проход продолжится сам.</li>
+    </ol>
+    <div class="call info"><span class="lbl">Про гео.</span> Страна выдачи определяется параметром <code>gl</code> и твоим IP. Хочешь видеть выдачу конкретной страны как местный — используй её через свой VPN/локацию.</div>
+  </div>
+
+  <!-- STEP 4 — report -->
+  <div class="step">
+    <h3><span class="num">4</span> Смотреть отчёт по позициям</h3>
+    <ul class="sub">
+      <li><span class="btn run">📊 Звіт</span> — таблица по каждому сайту: позиция, статус <b>«у топі» / «поза топ-5»</b>, сравнение с прошлым разом. Есть поиск и фильтр по гео.</li>
+      <li><span class="btn">📅 Вчора</span> — тот же отчёт, но с позициями примерно сутки назад (удобно сравнить «было/стало»).</li>
+      <li><span class="btn">⭳ CSV</span> / <span class="btn">⭳ JSON</span> — выгрузка результатов для Excel или бэкенда.</li>
+    </ul>
+    <p>Прямо в попапе тоже есть мини-таблица целей с последней позицией — её заголовок-строку можно свернуть, если список длинный.</p>
+  </div>
+
+  <!-- ============ PART 2 ============ -->
+  <div class="part"><span class="bar"></span><h2>Часть 2 · Telegram-алерты и авто-прогон</h2></div>
+
+  <!-- STEP 5 — telegram + auto -->
+  <div class="step">
+    <h3><span class="num">5</span> Подключить Telegram и автопрогон</h3>
+    <p><b>Сначала создай бота и узнай chat_id:</b></p>
+    <ol class="sub">
+      <li>В Telegram: <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → <code>/newbot</code> → имя → получишь <b>token</b> (<code>123456:ABC…</code>).</li>
+      <li><a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a> → <code>/start</code> → пришлёт <b>chat_id</b> (число).</li>
+      <li><b>Нажми Start у своего бота</b> — иначе он не сможет тебе написать.</li>
+    </ol>
+    <p><b>Потом в разделе «📣 Telegram-алерти + авто-прохід»:</b> вставь <b>token</b> и <b>Chat ID</b> и настрой, что нужно:</p>
+    <ul class="sub">
+      <li><b>Алерт, якщо сайт випав нижче топ-N</b> — впиши число (напр. <code>5</code>): пришлёт сообщение, когда сайт упал ниже топ-5 или исчез.</li>
+      <li><b>Нагадувати про всі сайти поза топом щопроходу</b> — дайджест всех «выпавших» после каждого прохода.</li>
+      <li>🎯 <b>Алерти про дропи</b> — писать, когда в топ-10 активного бренда появился новый дроп (см. Часть 3).</li>
+      <li><b>Авто-прохід кожні N год</b> — сам прогоняет весь список каждые N часов.</li>
+      <li><b>Повільний режим (drip)</b> — 1 запрос каждые N минут, целый день. Самый мягкий режим против блокировок.</li>
+      <li><b>Нічна пауза з … до …</b> — не беспокоить и не слать запросы ночью.</li>
+      <li><b>Щоденний звіт о … :00</b> — раз в день присылать сводку в Telegram.</li>
+      <li>🎯 <b>Окремий прогін активних брендів кожні N год</b> — чаще проверять только бренды-дропы (домены должны быть и в общем списке).</li>
+    </ul>
+    <p>Нажми <span class="btn">Зберегти + увімкнути</span>, затем <span class="btn">Тест Telegram</span> — должно прийти «Надіслано ✓».</p>
+    <div class="call tip"><span class="lbl">Рекомендуемый безопасный режим.</span> Включи <b>Повільний режим (drip)</b> ~1 запрос в 3–5 мин + <b>Нічна пауза</b>. Это самый низкий риск CAPTCHA. Chrome при этом должен быть включён.</div>
+  </div>
+
+  <!-- ============ PART 3 ============ -->
+  <div class="part drops"><span class="bar"></span><h2>Часть 3 · Дропы (Google Таблица)</h2></div>
+
+  <!-- STEP 6 — api key -->
+  <div class="step drops">
+    <h3><span class="num">6</span> Google API-ключ и доступ к таблице</h3>
+    <p>Нужен один раз, чтобы расширение <b>читало</b> твою таблицу.</p>
+    <ol class="sub">
+      <li><a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> → создай проект (<b>New Project</b>).</li>
+      <li>Включи API: <a href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank" rel="noopener">Google Sheets API</a> → <b>Enable</b>.</li>
+      <li><b>APIs &amp; Services → Credentials → Create credentials → API key</b> → скопируй <code>AIza…</code></li>
+      <li>В самой таблице: <b>«Поділитися»</b> → <b>«Усі, хто має посилання — Читач»</b>.</li>
+    </ol>
+    <div class="call warn"><span class="lbl">Важно.</span> Выбирай именно <b>«API key»</b> (не «Help me choose», не OAuth, не Service account). После создания можно <b>Restrict key → Google Sheets API</b> для безопасности.</div>
+  </div>
+
+  <!-- STEP 7 — sheet template -->
+  <div class="step drops">
+    <h3><span class="num">7</span> Заполнить таблицу по шаблону</h3>
+    <ul class="sub">
+      <li>Каждая <b>вкладка = проект</b> (бренд + гео). Первая строка — заголовки.</li>
+      <li>Колонки: <code>domain</code>, <code>brand</code>, <code>Type</code>, <code>geo</code>. В <code>domain</code> — сами дроп-домены; <code>geo</code> — код страны (<code>FR</code>, <code>IT</code>, <code>ES</code>…).</li>
+    </ul>
+    <div class="tablewrap">
+      <table class="tpl d">
+        <thead><tr><th>domain</th><th>brand</th><th>Type</th><th>geo</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="dom">meuse-internet.fr</td><td>Gamblerina</td><td>monobrand</td><td>FR</td><td class="star">✱</td></tr>
+          <tr><td class="dom">carpes-koi.fr</td><td>Gamblerina</td><td>monobrand</td><td>FR</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="call warn"><span class="lbl">Как отметить проект.</span> Поставь <b><code>*</code> в любой клетке</b> вкладки (или в её названии) — вся вкладка идёт в работу. Убрал <code>*</code> → перестаёт отслеживаться.</div>
+    <div class="call info"><span class="lbl">Почему «*», а не «+».</span> Ячейка, начинающаяся с <code>+</code>, превращается в формулу и ломается. Со звёздочкой такого нет.</div>
+  </div>
+
+  <!-- STEP 8 — connect + run drops -->
+  <div class="step drops">
+    <h3><span class="num">8</span> Подключить, синхронизировать и смотреть дропы</h3>
+    <ol class="sub">
+      <li>Раздел <b>«📊 Google Таблиця (авто-дропи)»</b>: вставь ссылку + API-ключ, включи <b>Авто-синхронізацію</b>, доп. слово оставь <code>casino</code>.</li>
+      <li><span class="btn drop">Зберегти + увімкнути</span> → <span class="btn drop">Синхронізувати зараз</span>. Должно показать «✓ N вкладок · N проєктів · N запитів · N дропів».</li>
+      <li>Нажми <span class="btn drop">🎯 Прогін дропів</span> — прогон только по активным брендам из таблицы.</li>
+      <li>Открой <span class="btn drop">🎯 Дропи</span> — по каждому проекту видно топ-10 и какие твои дропы туда попали (точное совпадение по домену).</li>
+    </ol>
+    <p style="margin-top:12px">Метки в результатах:</p>
+    <div class="legend">
+      <span class="tag drop">Дроп</span>
+      <span class="tag you">Ваш сайт</span>
+      <span class="tag comp">Конкурент</span>
+      <span class="tag other">Агрегатор / Іньше</span>
+    </div>
+    <div class="call info"><span class="lbl">Запросы по дропам.</span> На каждый проект — два запроса: «бренд» и «бренд casino», в нужном гео. Вкладка «Дропи» показывает <b>только</b> бренды из таблицы; обычный ▶ Прохід туда ничего не добавляет.</div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="sec-label">Частые проблемы</div>
+  <div class="faq">
+    <details>
+      <summary>Google постоянно просит CAPTCHA / ошибка 403</summary>
+      <div class="ans">Слишком много запросов подряд. Реши капчу в открытой вкладке (проход продолжится), увеличь <b>паузу між запитами</b>, включи <b>drip</b> и <b>нічну паузу</b>, убери лишние проекты. Меньше запросов = меньше блокировок.</div>
+    </details>
+    <details>
+      <summary>Telegram: «chat not found» или тест не проходит</summary>
+      <div class="ans">Чаще всего — не нажал <b>Start</b> у своего бота. Ещё: <code>chat_id</code> должен быть <b>числом</b>, а token — без пробелов. Тест теперь пишет, что именно не так — токен или chat_id.</div>
+    </details>
+    <details>
+      <summary>Синхронизация таблицы — «0 вкладок / 0 проєктів»</summary>
+      <div class="ans">Нигде не стоит <b><code>*</code></b>; или нет колонок <code>domain</code>/<code>brand</code> в первой строке; или таблица не открыта «по ссылке — Читач»; или не включён <b>Google Sheets API</b>.</div>
+    </details>
+    <details>
+      <summary>Во вкладке «Дропи» пусто</summary>
+      <div class="ans">Там показываются <b>только</b> активные бренды из таблицы. Подключи таблицу, синхронизируй и нажми <span class="btn drop">🎯 Прогін дропів</span>. Обычный ▶ Прохід сюда ничего не добавляет.</div>
+    </details>
+    <details>
+      <summary>Позиции не обновляются сами</summary>
+      <div class="ans">Включи <b>Авто-прохід</b> (или <b>drip</b>) в разделе Telegram и держи Chrome открытым. Вручную обновляет кнопка <span class="btn run">▶ Прохід</span>.</div>
+    </details>
+  </div>
+
+  <!-- Glossary -->
+  <div class="sec-label">Мини-словарь</div>
+  <dl class="gloss">
+    <div><dt>Позиция</dt><dd>Номер твоего сайта в органической выдаче Google по ключевику.</dd></div>
+    <div><dt>Дроп</dt><dd>Вспомогательный домен под бренд, который двигаем в топ.</dd></div>
+    <div><dt>Гео</dt><dd>Страна выдачи: FR — Франция, IT — Италия и т.д.</dd></div>
+    <div><dt>Прогон (прохід)</dt><dd>Один проход бота по всем запросам из списка.</dd></div>
+    <div><dt>Drip</dt><dd>Мягкий режим: по одному запросу раз в несколько минут.</dd></div>
+    <div><dt>Топ-10 / топ-5</dt><dd>Первые 10 / 5 обычных результатов Google.</dd></div>
+  </dl>
+
+  <hr class="soft" />
+  <footer>
+    Нужна только работа с дропами, без списка сайтов и отчётов? Есть облегчённая версия — <b>Drop Finder</b>: те же дропы и таблица, но без остального.
+  </footer>
+
+</div>
